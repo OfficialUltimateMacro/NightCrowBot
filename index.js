@@ -4,153 +4,195 @@ const { createHash } = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { Client, Events, GatewayIntentBits, PermissionFlagsBits } = require('discord.js');
+const { createWorker } = require('tesseract.js');
 
 const PROOF_CHANNEL_ID = process.env.SUB_PROOF_CHANNEL_ID || '1551744713688621126';
 const FREE_ACCESS_ROLE_ID = process.env.FREE_ACCESS_ROLE_ID || '1551747469455654963';
 const FREE_PRODUCTS_CHANNEL_ID = process.env.FREE_PRODUCTS_CHANNEL_ID || '1551745615761768569';
+const OCR_LANGUAGES = process.env.OCR_LANGUAGES || 'eng+hin';
+const OCR_CACHE_PATH = process.env.OCR_CACHE_PATH || path.join(process.cwd(), 'data', 'ocr-cache');
 const REVIEW_COOLDOWN_MS = 30_000;
 const MAX_PROOF_BYTES = 10 * 1024 * 1024;
 const HASH_STORE_PATH = process.env.PROOF_HASH_STORE_PATH || path.join(process.cwd(), 'data', 'proof-hashes.json');
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff']);
+const SUBSCRIBED_LABELS = [
+  /\bsubscribed\b/i,
+  /\bsuscrit[oa]s?\b/i,
+  /\babonn[ée]s?\b/i,
+  /\binscrit[oa]s?\b/i,
+  /\babonniert\b/i,
+  /\biscritt[oa]\b/i,
+  /\bberlangganan\b/i,
+  /\bgeabonneerd\b/i,
+  /\bprenumeruje\b/i,
+  /\bđã\s*đăng\s*ký\b/i,
+  /\babone\s*olundu\b/i,
+  /\bподписан[аоы]?\b/i,
+  /已订阅|已訂閱|登録済み|구독중|구독함|सदस्यता\s*ली\s*गई|تم\s*الاشتراك/,
+];
+
 const cooldowns = new Map();
-let proofHashes = new Set();
 const pendingProofHashes = new Set();
+let proofHashes = new Set();
+let ocrWorkerPromise;
+let ocrQueue = Promise.resolve();
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.BOT_TOKEN;
 if (!DISCORD_TOKEN) throw new Error('DISCORD_TOKEN is missing. Add it as a private server variable.');
-const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL;
-const OCR_SERVICE_SECRET = process.env.OCR_SERVICE_SECRET;
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent],
   allowedMentions: { parse: [] },
 });
 
-function hasOnlyOneImage(message) {
-  if (message.content.trim() !== '' || message.attachments.size !== 1) return false;
-  const attachment = message.attachments.first();
-  const extension = path.extname(attachment.name || '').toLowerCase();
-  return Boolean(
-    attachment &&
-    attachment.size <= MAX_PROOF_BYTES &&
-    ((attachment.contentType || '').toLowerCase().startsWith('image/') || IMAGE_EXTENSIONS.has(extension))
-  );
-}
-
-async function remove(message) {
-  try {
-    await message.delete();
-    return true;
-  } catch (error) {
-    console.error('Could not remove invalid proof post:', error);
-    return false;
-  }
-}
-
-async function reply(message, text) {
+async function reply(message, content) {
   await message.reply({
-    content: text,
+    content,
     allowedMentions: { parse: [] },
     failIfNotExists: false,
   }).catch((error) => console.error('Could not send proof response:', error));
 }
 
-async function imageHash(attachment) {
-  if (attachment.size > MAX_PROOF_BYTES) throw new Error('Proof image is too large.');
+function isImageAttachment(attachment) {
+  const contentType = (attachment.contentType || '').toLowerCase();
+  const extension = path.extname(attachment.name || '').toLowerCase();
+  return contentType.startsWith('image/') || IMAGE_EXTENSIONS.has(extension);
+}
+
+async function downloadProof(attachment) {
+  if (attachment.size > MAX_PROOF_BYTES) throw new Error('Proof image exceeds the 10 MB limit.');
+
   const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15_000) });
-  if (!response.ok) throw new Error('Could not read the proof image (' + response.status + ').');
+  if (!response.ok) throw new Error('Image download failed with status ' + response.status + '.');
+
   const bytes = Buffer.from(await response.arrayBuffer());
-  return createHash('sha256').update(bytes).digest('hex');
+  if (bytes.length === 0 || bytes.length > MAX_PROOF_BYTES) throw new Error('Proof image is empty or exceeds the 10 MB limit.');
+
+  return {
+    bytes,
+    hash: createHash('sha256').update(bytes).digest('hex'),
+  };
 }
 
 async function rememberHash(hash) {
   const updated = new Set(proofHashes);
   updated.add(hash);
   await fs.mkdir(path.dirname(HASH_STORE_PATH), { recursive: true });
-  await fs.writeFile(HASH_STORE_PATH, JSON.stringify([...updated]), 'utf8');
+  const temporaryPath = HASH_STORE_PATH + '.tmp';
+  await fs.writeFile(temporaryPath, JSON.stringify([...updated]), 'utf8');
+  await fs.rename(temporaryPath, HASH_STORE_PATH);
   proofHashes = updated;
 }
 
-async function reviewProof(imageUrl) {
-  if (!OCR_SERVICE_URL || !OCR_SERVICE_SECRET) {
-    throw new Error('OCR_SERVICE_URL or OCR_SERVICE_SECRET is missing.');
+async function getOcrWorker() {
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = (async () => {
+      await fs.mkdir(OCR_CACHE_PATH, { recursive: true });
+      return createWorker(OCR_LANGUAGES, undefined, { cachePath: OCR_CACHE_PATH });
+    })().catch((error) => {
+      ocrWorkerPromise = undefined;
+      throw error;
+    });
   }
-  const response = await fetch(OCR_SERVICE_URL.replace(/\/$/, '') + '/review', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-nightcrow-secret': OCR_SERVICE_SECRET,
-    },
-    body: JSON.stringify({ image_url: imageUrl }),
-    signal: AbortSignal.timeout(20_000),
+  return ocrWorkerPromise;
+}
+
+function recognizeImage(bytes) {
+  const task = ocrQueue.then(async () => {
+    const worker = await getOcrWorker();
+    const result = await worker.recognize(bytes);
+    return result.data.text || '';
   });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error('OCR service returned ' + response.status + (detail ? ': ' + detail.slice(0, 180) : '.'));
+  ocrQueue = task.then(() => undefined, () => undefined);
+  return task;
+}
+
+function hasNightcrowName(text) {
+  const normalized = text.normalize('NFKC').toLowerCase();
+  const compact = normalized.replace(/[\s._-]+/g, '');
+  return compact.includes('nightcrowstudios') ||
+    compact.includes('rblxnightcrowstudios') ||
+    /night[\W_]*crow[\W_]*studios?/i.test(normalized);
+}
+
+function hasSubscribedLabel(text) {
+  return SUBSCRIBED_LABELS.some((label) => label.test(text.normalize('NFKC')));
+}
+
+async function reviewProof(bytes) {
+  const text = await recognizeImage(bytes);
+  if (!hasNightcrowName(text)) {
+    return { accepted: false, reason: 'Nightcrow Studios was not readable.' };
   }
-  const result = await response.json();
-  return {
-    accepted: result.accepted === true,
-    reason: String(result.reason || 'The screenshot could not be verified.'),
-  };
+  if (!hasSubscribedLabel(text)) {
+    return { accepted: false, reason: 'A subscribed status was not readable.' };
+  }
+  return { accepted: true };
 }
 
 client.once(Events.ClientReady, (ready) => {
   console.log('Nightcrow Bot is online as ' + ready.user.tag + '.');
-  if (!OCR_SERVICE_URL || !OCR_SERVICE_SECRET) {
-    console.error('Proof checks are offline: OCR_SERVICE_URL and OCR_SERVICE_SECRET must both be configured.');
-  }
+  console.log('Local OCR languages: ' + OCR_LANGUAGES + '.');
 });
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || message.channelId !== PROOF_CHANNEL_ID || !message.guild) return;
+  if (message.attachments.size === 0) return;
 
-  if (!hasOnlyOneImage(message)) {
-    const removed = await remove(message);
-    if (removed) await reply(message, 'Please send one image only—no text or other files.');
-    else await reply(message, 'Please send one image only. I could not remove that post; ask a moderator for help.');
+  if (message.attachments.size !== 1) {
+    await reply(message, 'Please send one screenshot image at a time. Nothing was deleted.');
     return;
   }
 
   const attachment = message.attachments.first();
-  let hash;
+  if (!isImageAttachment(attachment)) {
+    await reply(message, 'Please upload a screenshot image. Nothing was deleted.');
+    return;
+  }
+
+  let proof;
   try {
-    hash = await imageHash(attachment);
+    proof = await downloadProof(attachment);
   } catch (error) {
     console.error('Proof image read failed:', error);
     await reply(message, 'I could not read that image. Please try a PNG, JPG, or WEBP under 10 MB.');
     return;
   }
 
-  if (proofHashes.has(hash)) {
-    await reply(message, 'That exact screenshot was already submitted. This copy was not deleted.');
+  if (proofHashes.has(proof.hash)) {
+    await reply(message, 'That exact screenshot was already submitted. Your image is still here.');
     return;
   }
-  if (pendingProofHashes.has(hash)) {
-    await reply(message, 'That exact screenshot is already being checked. This copy was not deleted.');
+  if (pendingProofHashes.has(proof.hash)) {
+    await reply(message, 'That exact screenshot is already being checked. Your image is still here.');
     return;
   }
 
   const now = Date.now();
+  for (const [userId, expiresAt] of cooldowns) {
+    if (expiresAt <= now) cooldowns.delete(userId);
+  }
   if ((cooldowns.get(message.author.id) || 0) > now) {
-    await reply(message, 'Please wait a moment before sending another screenshot. Your image is still here.');
+    await reply(message, 'Please wait a little before trying another screenshot. Your image is still here.');
     return;
   }
 
-  pendingProofHashes.add(hash);
+  pendingProofHashes.add(proof.hash);
   cooldowns.set(message.author.id, now + REVIEW_COOLDOWN_MS);
+  await message.channel.sendTyping().catch(() => null);
+
   try {
     let review;
     try {
-      review = await reviewProof(attachment.url);
+      review = await reviewProof(proof.bytes);
     } catch (error) {
-      console.error('Proof review unavailable:', error);
+      console.error('Local OCR failed:', error);
       await reply(message, 'Verification is temporarily unavailable. Your image is still here—please try again soon.');
       return;
     }
 
     if (!review.accepted) {
-      await reply(message, 'Not verified: ' + review.reason + ' Please send a clear NIGHT CROW STUDIOS subscription screenshot.');
+      await reply(message, 'I could not verify this screenshot: ' + review.reason + ' Your image is still here.');
       return;
     }
 
@@ -158,27 +200,26 @@ client.on(Events.MessageCreate, async (message) => {
       const member = message.member || await message.guild.members.fetch(message.author.id);
       const role = message.guild.roles.cache.get(FREE_ACCESS_ROLE_ID) || await message.guild.roles.fetch(FREE_ACCESS_ROLE_ID);
       const botMember = message.guild.members.me || await message.guild.members.fetch(client.user.id);
+
       if (!role) throw new Error('Free Access role was not found.');
       if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('Manage Roles permission is missing.');
       if (role.position >= botMember.roles.highest.position) throw new Error('Move Nightcrow Bot above Free Access in the role list.');
       if (!member.roles.cache.has(role.id)) await member.roles.add(role, 'Verified Nightcrow YouTube subscription proof');
 
-      // Save only after review and role grant succeed, so an OCR outage or role issue
-      // never prevents the member from retrying the same legitimate screenshot.
       try {
-        await rememberHash(hash);
+        await rememberHash(proof.hash);
       } catch (error) {
         console.error('Could not persist proof hash:', error);
-        proofHashes.add(hash);
+        proofHashes.add(proof.hash);
       }
 
       await reply(message, 'You have been successfully verified! You now have access to <#' + FREE_PRODUCTS_CHANNEL_ID + '>.');
     } catch (error) {
       console.error('Role grant failed:', error);
-      await reply(message, 'Your screenshot passed, but I could not add the role. Please contact a moderator.');
+      await reply(message, 'Your screenshot looked valid, but I could not add the role. Please contact staff.');
     }
   } finally {
-    pendingProofHashes.delete(hash);
+    pendingProofHashes.delete(proof.hash);
   }
 });
 
