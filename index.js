@@ -47,10 +47,12 @@ async function say(channel, title, description, fields) {
 }
 
 async function verificationSuccess(channel, roleId) {
-  const cleanEmbed = new EmbedBuilder()
-    .setColor(0xf2f3f0)
-    .setDescription(`Your subscription proof has been verified. You now have access to <#${FREE_PRODUCTS_CHANNEL_ID}>.`);
-  await channel.send({ embeds: [cleanEmbed], allowedMentions: { roles: [roleId] } }).catch(() => null);
+  // Keep this as a simple confirmation, like the reference flow. Discord renders
+  // the channel mention as a clickable link to the free-products channel.
+  await channel.send({
+    content: `You have been successfully verified! You now have access to <#${FREE_PRODUCTS_CHANNEL_ID}>.`,
+    allowedMentions: { parse: [] },
+  }).catch(() => null);
 }
 
 async function loadProofHashes() {
@@ -109,13 +111,12 @@ client.on(Events.MessageCreate, async (message) => {
   try {
     hash = await imageHash(attachment);
     if (proofHashes.has(hash)) {
-      await remove(message);
-      await say(message.channel, 'Proof already used', 'That exact screenshot has already been submitted. Upload your own current subscription proof.');
+      await say(message.channel, 'Proof already used', 'That exact image was already submitted, so it cannot be used again. Your image has not been deleted.');
       return;
     }
     await rememberHash(hash);
   } catch (error) {
-    console.error('Proof hash failed:', error); await remove(message);
+    console.error('Proof hash failed:', error);
     await say(message.channel, 'Proof not accepted', 'I could not safely read that image. Upload a normal screenshot under 10 MB.');
     return;
   }
@@ -123,11 +124,10 @@ client.on(Events.MessageCreate, async (message) => {
   let review;
   try { review = await reviewProof(attachment.url); }
   catch (error) {
-    console.error('Proof review failed:', error); await remove(message);
-    await say(message.channel, 'Proof review unavailable', 'Your image was removed to keep this channel clean. Try again later or contact staff.'); return;
+    console.error('Proof review failed:', error);
+    await say(message.channel, 'Proof review unavailable', 'Your image is still here, but verification is temporarily unavailable. Try again later or contact staff.'); return;
   }
   if (!review.accepted) {
-    await remove(message);
     await say(message.channel, 'Proof not accepted', `No role was added. ${review.reason}`, [{ name: 'Required proof', value: 'A clear YouTube screenshot showing **Night Crow Studios** and a visible **subscribed** state.' }]);
     return;
   }
@@ -138,12 +138,12 @@ client.on(Events.MessageCreate, async (message) => {
     if (!message.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('Manage Roles permission is missing.');
     if (role.position >= message.guild.members.me.roles.highest.position) throw new Error('Move Nightcrow Bot above Free Access in the role list.');
     if (!member.roles.cache.has(role.id)) await member.roles.add(role, 'Verified Nightcrow YouTube subscription proof');
-    await remove(message);
     await verificationSuccess(message.channel, role.id);
   } catch (error) {
-    console.error('Role grant failed:', error); await remove(message);
+    console.error('Role grant failed:', error);
     await say(message.channel, 'Verified, but setup needs attention', 'Your proof passed, but I could not add the role. Staff: give the bot **Manage Roles** and place its role above Free Access.');
   }
 });
 
 loadProofHashes().then(() => client.login(DISCORD_TOKEN));
+
