@@ -68,3 +68,9 @@ def review(proof: Proof, x_nightcrow_secret: str = Header(default="")):
     if contains(text, SUBSCRIBE_ACTIONS) or not contains(text, SUBSCRIBED_TERMS):
         return {"accepted": False, "reason": "A visible subscribed state was not readable."}
     return {"accepted": True, "reason": "Nightcrow and a subscribed state were read locally."}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "25968")))
