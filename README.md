@@ -7,8 +7,8 @@ Nightcrow Studios' Discord automation bot.
 The bot watches only channel `1551744713688621126`.
 
 - Deletes posts containing text, links, extra files, non-images, or more than one attachment.
-- Rejects NSFW, unrelated, unclear, non-YouTube, wrong-channel, and non-subscribed screenshots through strict vision review.
-- Supports localized YouTube UI and light/dark themes.
+- Uses a private local PP-OCRv4 service to read the Nightcrow channel and a localized subscribed-state label.
+- Supports common localized YouTube UI labels and light/dark themes. OCR cannot detect NSFW or prove a screenshot is unedited, so a separate NSFW classifier is still needed before opening verification widely.
 - Gives role `1551747469455654963` only after a clear accepted review.
 - Links verified members directly to `#free-products` (`1551745615761768569`).
 - Saves a SHA-256 fingerprint of every submitted image. An exact re-upload by anyone is deleted and rejected.
@@ -24,11 +24,15 @@ Add these in the **Nightcrow Bot** Apollo server's Variables page; never commit 
 DISCORD_TOKEN=your Discord bot token
 CLIENT_ID=Discord Developer Portal → General Information → Application ID
 GUILD_ID=right-click the Nightcrow Studios Discord server → Copy Server ID
-OPENAI_API_KEY=your OpenAI API key for image review
-OPENAI_MODEL=gpt-4.1-mini
+OCR_SERVICE_URL=http://your-private-ocr-host:8000
+OCR_SERVICE_SECRET=a-long-random-secret-shared-with-the-ocr-service
 ```
 
-The bot deliberately will not grant roles until `OPENAI_API_KEY` is configured. Enabling it sends submitted proof images to OpenAI for review and may incur API charges—get a guardian's approval before enabling it.
+The bot deliberately will not grant roles until the private OCR service is configured. The submitted proof image is sent only to your OCR server.
+
+## Local OCR service
+
+Deploy `ocr-service/` to a separate Python-capable server. It needs at least 1 GB RAM and 2 GB disk during model installation and first load. See `ocr-service/README.md`.
 
 ## Discord setup
 

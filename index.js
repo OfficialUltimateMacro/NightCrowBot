@@ -1,6 +1,5 @@
 require('dotenv').config();
 
-const OpenAI = require('openai');
 const { createHash } = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -16,8 +15,10 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 const cooldowns = new Map();
 let proofHashes = new Set();
 
-if (!process.env.DISCORD_TOKEN) throw new Error('DISCORD_TOKEN is missing. Add it as a private server variable.');
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.BOT_TOKEN;
+if (!DISCORD_TOKEN) throw new Error('DISCORD_TOKEN is missing. Add it as a private server variable.');
+const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL;
+const OCR_SERVICE_SECRET = process.env.OCR_SERVICE_SECRET;
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent],
@@ -76,29 +77,19 @@ async function rememberHash(hash) {
 }
 
 async function reviewProof(imageUrl) {
-  if (!openai) return { accepted: false, reason: 'Automatic review is not configured yet.' };
-  const instructions = [
-    'Review this Discord YouTube subscription-proof screenshot. Be extremely strict.',
-    'Accept ONLY if it clearly shows a real YouTube channel page or subscription confirmation for NIGHT CROW STUDIOS / NIGHTCROW STUDIOS or @RBLXNIGHTCROWSTUDIOS, AND a visible currently subscribed state.',
-    'The subscribed label may be in any language. Light/dark themes, mobile/desktop layouts, and color themes are acceptable.',
-    'Reject NSFW/sexual content, unrelated images or GIFs, artwork, thumbnails, text-only images, non-YouTube UI, another channel, a visible Subscribe button rather than a subscribed state, unclear/possibly edited images, or anything you cannot confidently verify. Never guess.',
-    'Return only JSON: {"accepted":boolean,"reason":"short explanation"}.',
-  ].join(' ');
-  const response = await openai.responses.create({
-    model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
-    input: [{ role: 'user', content: [{ type: 'input_text', text: instructions }, { type: 'input_image', image_url: imageUrl, detail: 'high' }] }],
-    text: { format: { type: 'json_schema', name: 'subscription_proof_review', strict: true, schema: {
-      type: 'object', properties: { accepted: { type: 'boolean' }, reason: { type: 'string' } },
-      required: ['accepted', 'reason'], additionalProperties: false,
-    } } },
+  if (!OCR_SERVICE_URL || !OCR_SERVICE_SECRET) return { accepted: false, reason: 'Local OCR verification is not configured yet.' };
+  const response = await fetch(`${OCR_SERVICE_URL.replace(/\/$/, '')}/review`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-nightcrow-secret': OCR_SERVICE_SECRET },
+    body: JSON.stringify({ image_url: imageUrl }), signal: AbortSignal.timeout(20_000),
   });
-  const result = JSON.parse(response.output_text);
+  if (!response.ok) throw new Error(`OCR service returned ${response.status}.`);
+  const result = await response.json();
   return { accepted: result.accepted === true, reason: String(result.reason || 'The screenshot could not be verified.') };
 }
 
 client.once(Events.ClientReady, (ready) => {
   console.log(`Nightcrow Bot is online as ${ready.user.tag}.`);
-  if (!openai) console.warn('OPENAI_API_KEY is not set: proof posts will be rejected safely.');
+  if (!OCR_SERVICE_URL || !OCR_SERVICE_SECRET) console.warn('OCR service is not configured: proof posts will be rejected safely.');
 });
 
 client.on(Events.MessageCreate, async (message) => {
@@ -155,4 +146,4 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-loadProofHashes().then(() => client.login(process.env.DISCORD_TOKEN));
+loadProofHashes().then(() => client.login(DISCORD_TOKEN));
