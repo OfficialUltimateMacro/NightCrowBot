@@ -26,18 +26,161 @@ const client = new Client({
   allowedMentions: { parse: [] },
 });
 
-async function say(channel, text) {
-  await channel.send({ content: text, allowedMentions: { parse: [] } }).catch(() => null);
+function hasOnlyOneImage(message) {
+  if (message.content.trim() !== '' || message.attachments.size !== 1) return false;
+  const attachment = message.attachments.first();
+  const extension = path.extname(attachment.name || '').toLowerCase();
+  return Boolean(
+    attachment &&
+    attachment.size <= MAX_PROOF_BYTES &&
+    ((attachment.contentType || '').toLowerCase().startsWith('image/') || IMAGE_EXTENSIONS.has(extension))
+  );
 }
 
-async function verificationSuccess(channel) {
-  // Keep this as a simple confirmation, like the reference flow. Discord renders
-  // the channel mention as a clickable link to the free-products channel.
-  await channel.send({
-    content: `You have been successfully verified! You now have access to <#${FREE_PRODUCTS_CHANNEL_ID}>.`,
-    allowedMentions: { parse: [] },
-  }).catch(() => null);
+async function remove(message) {
+  try {
+    await message.delete();
+    return true;
+  } catch (error) {
+    console.error('Could not remove invalid proof post:', error);
+    return false;
+  }
 }
+
+async function reply(message, text) {
+  await message.reply({
+    content: text,
+    allowedMentions: { parse: [] },
+    failIfNotExists: false,
+  }).catch((error) => console.error('Could not send proof response:', error));
+}
+
+async function imageHash(attachment) {
+  if (attachment.size > MAX_PROOF_BYTES) throw new Error('Proof image is too large.');
+  const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error('Could not read the proof image (' + response.status + ').');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+async function rememberHash(hash) {
+  const updated = new Set(proofHashes);
+  updated.add(hash);
+  await fs.mkdir(path.dirname(HASH_STORE_PATH), { recursive: true });
+  await fs.writeFile(HASH_STORE_PATH, JSON.stringify([...updated]), 'utf8');
+  proofHashes = updated;
+}
+
+async function reviewProof(imageUrl) {
+  if (!OCR_SERVICE_URL || !OCR_SERVICE_SECRET) {
+    throw new Error('OCR_SERVICE_URL or OCR_SERVICE_SECRET is missing.');
+  }
+  const response = await fetch(OCR_SERVICE_URL.replace(/\/$/, '') + '/review', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-nightcrow-secret': OCR_SERVICE_SECRET,
+    },
+    body: JSON.stringify({ image_url: imageUrl }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error('OCR service returned ' + response.status + (detail ? ': ' + detail.slice(0, 180) : '.'));
+  }
+  const result = await response.json();
+  return {
+    accepted: result.accepted === true,
+    reason: String(result.reason || 'The screenshot could not be verified.'),
+  };
+}
+
+client.once(Events.ClientReady, (ready) => {
+  console.log('Nightcrow Bot is online as ' + ready.user.tag + '.');
+  if (!OCR_SERVICE_URL || !OCR_SERVICE_SECRET) {
+    console.error('Proof checks are offline: OCR_SERVICE_URL and OCR_SERVICE_SECRET must both be configured.');
+  }
+});
+
+client.on(Events.MessageCreate, async (message) => {
+  if (message.author.bot || message.channelId !== PROOF_CHANNEL_ID || !message.guild) return;
+
+  if (!hasOnlyOneImage(message)) {
+    const removed = await remove(message);
+    if (removed) await reply(message, 'Please send one image only—no text or other files.');
+    else await reply(message, 'Please send one image only. I could not remove that post; ask a moderator for help.');
+    return;
+  }
+
+  const attachment = message.attachments.first();
+  let hash;
+  try {
+    hash = await imageHash(attachment);
+  } catch (error) {
+    console.error('Proof image read failed:', error);
+    await reply(message, 'I could not read that image. Please try a PNG, JPG, or WEBP under 10 MB.');
+    return;
+  }
+
+  if (proofHashes.has(hash)) {
+    await reply(message, 'That exact screenshot was already submitted. This copy was not deleted.');
+    return;
+  }
+  if (pendingProofHashes.has(hash)) {
+    await reply(message, 'That exact screenshot is already being checked. This copy was not deleted.');
+    return;
+  }
+
+  const now = Date.now();
+  if ((cooldowns.get(message.author.id) || 0) > now) {
+    await reply(message, 'Please wait a moment before sending another screenshot. Your image is still here.');
+    return;
+  }
+
+  pendingProofHashes.add(hash);
+  cooldowns.set(message.author.id, now + REVIEW_COOLDOWN_MS);
+  try {
+    let review;
+    try {
+      review = await reviewProof(attachment.url);
+    } catch (error) {
+      console.error('Proof review unavailable:', error);
+      await reply(message, 'Verification is temporarily unavailable. Your image is still here—please try again soon.');
+      return;
+    }
+
+    if (!review.accepted) {
+      await reply(message, 'Not verified: ' + review.reason + ' Please send a clear NIGHT CROW STUDIOS subscription screenshot.');
+      return;
+    }
+
+    try {
+      const member = message.member || await message.guild.members.fetch(message.author.id);
+      const role = message.guild.roles.cache.get(FREE_ACCESS_ROLE_ID) || await message.guild.roles.fetch(FREE_ACCESS_ROLE_ID);
+      const botMember = message.guild.members.me || await message.guild.members.fetch(client.user.id);
+      if (!role) throw new Error('Free Access role was not found.');
+      if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('Manage Roles permission is missing.');
+      if (role.position >= botMember.roles.highest.position) throw new Error('Move Nightcrow Bot above Free Access in the role list.');
+      if (!member.roles.cache.has(role.id)) await member.roles.add(role, 'Verified Nightcrow YouTube subscription proof');
+
+      // Save only after review and role grant succeed, so an OCR outage or role issue
+      // never prevents the member from retrying the same legitimate screenshot.
+      try {
+        await rememberHash(hash);
+      } catch (error) {
+        console.error('Could not persist proof hash:', error);
+        proofHashes.add(hash);
+      }
+
+      await reply(message, 'You have been successfully verified! You now have access to <#' + FREE_PRODUCTS_CHANNEL_ID + '>.');
+    } catch (error) {
+      console.error('Role grant failed:', error);
+      await reply(message, 'Your screenshot passed, but I could not add the role. Please contact a moderator.');
+    }
+  } finally {
+    pendingProofHashes.delete(hash);
+  }
+});
 
 async function loadProofHashes() {
   try {
@@ -48,113 +191,4 @@ async function loadProofHashes() {
   }
 }
 
-async function imageHash(attachment) {
-  if (attachment.size > MAX_PROOF_BYTES) throw new Error('Proof image is too large.');
-  const response = await fetch(attachment.url);
-  if (!response.ok) throw new Error(`Could not read the proof image (${response.status}).`);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  return createHash('sha256').update(bytes).digest('hex');
-}
-
-async function rememberHash(hash) {
-  proofHashes.add(hash);
-  await fs.mkdir(path.dirname(HASH_STORE_PATH), { recursive: true });
-  await fs.writeFile(HASH_STORE_PATH, JSON.stringify([...proofHashes]), 'utf8');
-}
-
-async function reviewProof(imageUrl) {
-  if (!OCR_SERVICE_URL || !OCR_SERVICE_SECRET) return { accepted: false, reason: 'Local OCR verification is not configured yet.' };
-  const response = await fetch(`${OCR_SERVICE_URL.replace(/\/$/, '')}/review`, {
-    method: 'POST', headers: { 'content-type': 'application/json', 'x-nightcrow-secret': OCR_SERVICE_SECRET },
-    body: JSON.stringify({ image_url: imageUrl }), signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error(`OCR service returned ${response.status}.`);
-  const result = await response.json();
-  return { accepted: result.accepted === true, reason: String(result.reason || 'The screenshot could not be verified.') };
-}
-
-client.once(Events.ClientReady, (ready) => {
-  console.log(`Nightcrow Bot is online as ${ready.user.tag}.`);
-  if (!OCR_SERVICE_URL || !OCR_SERVICE_SECRET) console.warn('OCR service is not configured: proof posts will be rejected safely.');
-});
-
-client.on(Events.MessageCreate, async (message) => {
-  if (message.author.bot || message.channelId !== PROOF_CHANNEL_ID) return;
-
-  if (!hasOnlyOneImage(message)) {
-    await remove(message);
-    await say(message.channel, 'Please send one image only, with no caption or extra files.');
-    return;
-  }
-
-  const attachment = message.attachments.first();
-  let hash;
-  try {
-    hash = await imageHash(attachment);
-  } catch (error) {
-    console.error('Proof hash failed:', error);
-    await say(message.channel, 'I could not read that image. Please try a PNG, JPG, or WEBP screenshot under 10 MB.');
-    return;
-  }
-
-  if (proofHashes.has(hash)) {
-    await say(message.channel, 'That exact screenshot has already been submitted. Your image has not been deleted.');
-    return;
-  }
-  if (pendingProofHashes.has(hash)) {
-    await say(message.channel, 'That exact screenshot is already being checked. Your image has not been deleted.');
-    return;
-  }
-
-  const now = Date.now();
-  if ((cooldowns.get(message.author.id) || 0) > now) {
-    await say(message.channel, 'Please wait a little before submitting another screenshot. Your image has been kept.');
-    return;
-  }
-
-  pendingProofHashes.add(hash);
-  cooldowns.set(message.author.id, now + REVIEW_COOLDOWN_MS);
-  await message.channel.sendTyping().catch(() => null);
-  try {
-    let review;
-    try {
-      review = await reviewProof(attachment.url);
-    } catch (error) {
-      console.error('Proof review failed:', error);
-      await say(message.channel, 'I could not verify this screenshot right now. Your image is still here—please try again shortly or contact staff.');
-      return;
-    }
-
-    if (!review.accepted) {
-      await say(message.channel, `I could not verify that subscription screenshot, so no role was added. ${review.reason} Please upload a clear screenshot showing NIGHT CROW STUDIOS and the subscribed state.`);
-      return;
-    }
-
-    // Record only verified screenshots. Temporary OCR outages or rejected proofs
-    // do not burn the user's exact image and prevent a legitimate retry.
-    try {
-      await rememberHash(hash);
-    } catch (error) {
-      console.error('Could not persist proof hash:', error);
-      proofHashes.add(hash);
-    }
-
-    try {
-      const member = message.member || await message.guild.members.fetch(message.author.id);
-      const role = message.guild.roles.cache.get(FREE_ACCESS_ROLE_ID) || await message.guild.roles.fetch(FREE_ACCESS_ROLE_ID);
-      if (!role) throw new Error('Free Access role was not found.');
-      if (!message.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('Manage Roles permission is missing.');
-      if (role.position >= message.guild.members.me.roles.highest.position) throw new Error('Move Nightcrow Bot above Free Access in the role list.');
-      if (!member.roles.cache.has(role.id)) await member.roles.add(role, 'Verified Nightcrow YouTube subscription proof');
-      await verificationSuccess(message.channel);
-    } catch (error) {
-      console.error('Role grant failed:', error);
-      await say(message.channel, 'Your subscription proof was verified, but I could not add the role. Please contact staff.');
-    }
-  } finally {
-    pendingProofHashes.delete(hash);
-  }
-});
-
 loadProofHashes().then(() => client.login(DISCORD_TOKEN));
-
