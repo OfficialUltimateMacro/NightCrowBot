@@ -6,5 +6,9 @@
   "main": "index.js",
   "scripts": { "start": "node index.js", "check": "node --check index.js" },
   "engines": { "node": ">=20" },
-  "dependencies": { "discord.js": "^14.25.1", "dotenv": "^16.6.1" }
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "dotenv": "^16.6.1",
+    "tesseract.js": "^7.0.0"
+  }
 }
