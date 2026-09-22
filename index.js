@@ -3,7 +3,7 @@ require('dotenv').config();
 const { createHash } = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { Client, Events, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, Events, GatewayIntentBits, PermissionFlagsBits } = require('discord.js');
 
 const PROOF_CHANNEL_ID = process.env.SUB_PROOF_CHANNEL_ID || '1551744713688621126';
 const FREE_ACCESS_ROLE_ID = process.env.FREE_ACCESS_ROLE_ID || '1551747469455654963';
@@ -14,6 +14,7 @@ const HASH_STORE_PATH = path.join(__dirname, 'data', 'proof-hashes.json');
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 const cooldowns = new Map();
 let proofHashes = new Set();
+const pendingProofHashes = new Set();
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.BOT_TOKEN;
 if (!DISCORD_TOKEN) throw new Error('DISCORD_TOKEN is missing. Add it as a private server variable.');
@@ -25,28 +26,11 @@ const client = new Client({
   allowedMentions: { parse: [] },
 });
 
-function embed(title, description, fields = []) {
-  return new EmbedBuilder().setColor(0x090909).setAuthor({ name: 'NIGHTCROW STUDIOS' })
-    .setTitle(title).setDescription(description).addFields(fields)
-    .setFooter({ text: 'Nightcrow verification' }).setTimestamp();
+async function say(channel, text) {
+  await channel.send({ content: text, allowedMentions: { parse: [] } }).catch(() => null);
 }
 
-function hasOnlyOneImage(message) {
-  if (message.content.trim() || message.attachments.size !== 1) return false;
-  const file = message.attachments.first();
-  const name = file.name?.toLowerCase() || '';
-  return Boolean(file.contentType?.startsWith('image/') || [...IMAGE_EXTENSIONS].some((ext) => name.endsWith(ext)));
-}
-
-async function remove(message) {
-  if (message.deletable) await message.delete().catch(() => null);
-}
-
-async function say(channel, title, description, fields) {
-  await channel.send({ embeds: [embed(title, description, fields)], allowedMentions: { parse: [] } }).catch(() => null);
-}
-
-async function verificationSuccess(channel, roleId) {
+async function verificationSuccess(channel) {
   // Keep this as a simple confirmation, like the reference flow. Discord renders
   // the channel mention as a clickable link to the free-products channel.
   await channel.send({
@@ -96,52 +80,79 @@ client.once(Events.ClientReady, (ready) => {
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || message.channelId !== PROOF_CHANNEL_ID) return;
-  const now = Date.now();
-  if ((cooldowns.get(message.author.id) || 0) > now) {
-    await remove(message); await say(message.channel, 'Please wait', 'One proof submission can be reviewed every 30 seconds.'); return;
-  }
-  cooldowns.set(message.author.id, now + REVIEW_COOLDOWN_MS);
+
   if (!hasOnlyOneImage(message)) {
     await remove(message);
-    await say(message.channel, 'Proof not accepted', 'Upload **one image only**—no text, captions, links, extra files, or non-image attachments.');
+    await say(message.channel, 'Please send one image only, with no caption or extra files.');
     return;
   }
+
   const attachment = message.attachments.first();
   let hash;
   try {
     hash = await imageHash(attachment);
-    if (proofHashes.has(hash)) {
-      await say(message.channel, 'Proof already used', 'That exact image was already submitted, so it cannot be used again. Your image has not been deleted.');
-      return;
-    }
-    await rememberHash(hash);
   } catch (error) {
     console.error('Proof hash failed:', error);
-    await say(message.channel, 'Proof not accepted', 'I could not safely read that image. Upload a normal screenshot under 10 MB.');
+    await say(message.channel, 'I could not read that image. Please try a PNG, JPG, or WEBP screenshot under 10 MB.');
     return;
   }
+
+  if (proofHashes.has(hash)) {
+    await say(message.channel, 'That exact screenshot has already been submitted. Your image has not been deleted.');
+    return;
+  }
+  if (pendingProofHashes.has(hash)) {
+    await say(message.channel, 'That exact screenshot is already being checked. Your image has not been deleted.');
+    return;
+  }
+
+  const now = Date.now();
+  if ((cooldowns.get(message.author.id) || 0) > now) {
+    await say(message.channel, 'Please wait a little before submitting another screenshot. Your image has been kept.');
+    return;
+  }
+
+  pendingProofHashes.add(hash);
+  cooldowns.set(message.author.id, now + REVIEW_COOLDOWN_MS);
   await message.channel.sendTyping().catch(() => null);
-  let review;
-  try { review = await reviewProof(attachment.url); }
-  catch (error) {
-    console.error('Proof review failed:', error);
-    await say(message.channel, 'Proof review unavailable', 'Your image is still here, but verification is temporarily unavailable. Try again later or contact staff.'); return;
-  }
-  if (!review.accepted) {
-    await say(message.channel, 'Proof not accepted', `No role was added. ${review.reason}`, [{ name: 'Required proof', value: 'A clear YouTube screenshot showing **Night Crow Studios** and a visible **subscribed** state.' }]);
-    return;
-  }
   try {
-    const member = message.member || await message.guild.members.fetch(message.author.id);
-    const role = message.guild.roles.cache.get(FREE_ACCESS_ROLE_ID) || await message.guild.roles.fetch(FREE_ACCESS_ROLE_ID);
-    if (!role) throw new Error('Free Access role was not found.');
-    if (!message.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('Manage Roles permission is missing.');
-    if (role.position >= message.guild.members.me.roles.highest.position) throw new Error('Move Nightcrow Bot above Free Access in the role list.');
-    if (!member.roles.cache.has(role.id)) await member.roles.add(role, 'Verified Nightcrow YouTube subscription proof');
-    await verificationSuccess(message.channel, role.id);
-  } catch (error) {
-    console.error('Role grant failed:', error);
-    await say(message.channel, 'Verified, but setup needs attention', 'Your proof passed, but I could not add the role. Staff: give the bot **Manage Roles** and place its role above Free Access.');
+    let review;
+    try {
+      review = await reviewProof(attachment.url);
+    } catch (error) {
+      console.error('Proof review failed:', error);
+      await say(message.channel, 'I could not verify this screenshot right now. Your image is still here—please try again shortly or contact staff.');
+      return;
+    }
+
+    if (!review.accepted) {
+      await say(message.channel, `I could not verify that subscription screenshot, so no role was added. ${review.reason} Please upload a clear screenshot showing NIGHT CROW STUDIOS and the subscribed state.`);
+      return;
+    }
+
+    // Record only verified screenshots. Temporary OCR outages or rejected proofs
+    // do not burn the user's exact image and prevent a legitimate retry.
+    try {
+      await rememberHash(hash);
+    } catch (error) {
+      console.error('Could not persist proof hash:', error);
+      proofHashes.add(hash);
+    }
+
+    try {
+      const member = message.member || await message.guild.members.fetch(message.author.id);
+      const role = message.guild.roles.cache.get(FREE_ACCESS_ROLE_ID) || await message.guild.roles.fetch(FREE_ACCESS_ROLE_ID);
+      if (!role) throw new Error('Free Access role was not found.');
+      if (!message.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('Manage Roles permission is missing.');
+      if (role.position >= message.guild.members.me.roles.highest.position) throw new Error('Move Nightcrow Bot above Free Access in the role list.');
+      if (!member.roles.cache.has(role.id)) await member.roles.add(role, 'Verified Nightcrow YouTube subscription proof');
+      await verificationSuccess(message.channel);
+    } catch (error) {
+      console.error('Role grant failed:', error);
+      await say(message.channel, 'Your subscription proof was verified, but I could not add the role. Please contact staff.');
+    }
+  } finally {
+    pendingProofHashes.delete(hash);
   }
 });
 
