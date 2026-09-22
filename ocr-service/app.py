@@ -59,7 +59,8 @@ def review(proof: Proof, x_nightcrow_secret: str = Header(default="")):
     if len(response.content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Image too large")
     image = Image.open(io.BytesIO(response.content)).convert("RGB")
-    result = ocr.ocr(image, cls=True)
+    # PaddleOCR 2.9.1 accepts encoded image bytes, not a PIL Image object.
+    result = ocr.ocr(response.content, cls=True)
     lines = result[0] if result else []
     raw = " ".join(item[1][0] for item in lines if item and item[1] and item[1][1] >= 0.65)
     text = normalized(raw)
