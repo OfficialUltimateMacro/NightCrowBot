@@ -136,6 +136,9 @@ async function reviewProof(bytes) {
 client.once(Events.ClientReady, (ready) => {
   console.log('Nightcrow Bot is online as ' + ready.user.tag + '.');
   console.log('Local OCR languages: ' + OCR_LANGUAGES.join(', ') + '.');
+  getOcrWorker()
+    .then(() => console.log('Local OCR worker ready.'))
+    .catch((error) => console.error('Local OCR worker failed to initialize:', error));
 });
 
 client.on(Events.MessageCreate, async (message) => {
