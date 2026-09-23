@@ -28,7 +28,7 @@ OCR is a lightweight screening check, not proof that a screenshot is genuine or 
    - `OCR_LANGUAGES`: optional Tesseract language codes. Defaults to `eng+hin`.
 4. In the Discord Developer Portal, enable Server Members Intent and Message Content Intent.
 5. Give the bot View Channel, Read Message History, Send Messages, and Manage Roles in the proof channel. Put its role above Free Access in the server role list.
-6. Start with `npm start`. Tesseract.js downloads the selected language data on first use and caches it under `data/ocr-cache`; the cache and duplicate-hash file are ignored by Git.
+6. Start with `npm start`. The bot loads the selected Tesseract language data during startup and caches it under `data/ocr-cache`; the cache and duplicate-hash file are ignored by Git.
 
 No separate OCR service, OCR URL, or OCR secret is required. The legacy `ocr-service/` folder is not used by this bot.
 
