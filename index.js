@@ -22,6 +22,8 @@ const FREE_ACCESS_ROLE_ID = process.env.FREE_ACCESS_ROLE_ID || '1551747469455654
 const FREE_PRODUCTS_CHANNEL_ID = process.env.FREE_PRODUCTS_CHANNEL_ID || '1551745615761768569';
 const SUPPORT_CHANNEL_ID = process.env.SUPPORT_CHANNEL_ID || '1551744887739654245';
 const RULES_CHANNEL_ID = process.env.RULES_CHANNEL_ID || '1551745881819054090';
+const FREE_ACCESS_INFO_CHANNEL_ID = process.env.FREE_ACCESS_INFO_CHANNEL_ID || '1551741541071196311';
+const HOW_TO_BUY_CHANNEL_ID = process.env.HOW_TO_BUY_CHANNEL_ID || '1551745010226036816';
 const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID || '1552112181343031326';
 const TICKET_STATE_PATH = process.env.TICKET_STATE_PATH || path.join(process.cwd(), 'data', 'ticket-state.json');
 const OCR_LANGUAGES = (process.env.OCR_LANGUAGES || 'eng,hin')
@@ -109,9 +111,27 @@ const managedMessages = [
         { name: 'Community', value: 'Be respectful. No harassment, hate speech, threats, NSFW content, spam, flooding, or unsolicited advertising.' },
         { name: 'Safety', value: 'Keep posts in the right channels. Do not promote illegal activity, cheating, exploits, or harmful files. Follow Discord’s Terms and Community Guidelines.' },
         { name: 'Privacy', value: 'Never post passwords, bot tokens, payment details, addresses, or anyone else’s private information.' },
-        { name: 'Product use', value: 'Follow the license included with each product. Do not leak, reupload, resell, or redistribute product files unless that license explicitly allows it. Keep included Nightcrow Studios credits and do not claim our work as your own.' },
+        { name: 'Product use', value: 'Use each product under its included license. Do not share, leak, reupload, or resell the product files as standalone assets. Keep included credits and do not claim Nightcrow Studios work as your own.' },
         { name: 'Need help?', value: 'Open a support ticket for purchase or product questions. Never send staff your password or payment credentials.' },
       ],
+    )] },
+  },
+  {
+    channelId: FREE_ACCESS_INFO_CHANNEL_ID,
+    marker: 'Nightcrow Studios • Free access v1',
+    payload: { embeds: [channelEmbed(
+      'Free product access',
+      'Subscribe to [Nightcrow Studios on YouTube](https://www.youtube.com/@RBLXNIGHTCROWSTUDIOS) to get access to <#' + FREE_PRODUCTS_CHANNEL_ID + '>. Then post one clear image showing that you are subscribed in <#' + PROOF_CHANNEL_ID + '>. Crow will check it and add the free access role when the proof passes.',
+      'Nightcrow Studios • Free access v1',
+    )] },
+  },
+  {
+    channelId: HOW_TO_BUY_CHANNEL_ID,
+    marker: 'Nightcrow Studios • How to buy v1',
+    payload: { embeds: [channelEmbed(
+      'How to buy',
+      'Go to [nightcrowstudios.com](https://nightcrowstudios.com) and buy any product. Use code **EasyMoney** for **5% off** your purchase. The code can only be used once.',
+      'Nightcrow Studios • How to buy v1',
     )] },
   },
 ];
