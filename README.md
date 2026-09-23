@@ -17,7 +17,7 @@ An exact-file hash cannot detect a resized, cropped, or edited copy. A screensho
 
 ## Support tickets and server information
 
-When the bot starts, it creates or updates a compact Nightcrow rules embed and a support selector in `1551744887739654245`. The existing purchase message is already present in `#how-to-buy`; free-access instructions are maintained separately.
+When the bot starts, it creates or updates compact Nightcrow embeds in the rules channel (`1551745881819054090`), support channel (`1551744887739654245`), free-access channel (`1551741541071196311`), and how-to-buy channel (`1551745010226036816`). Each managed post is matched by its footer and updated in place on later starts.
 
 The selector opens a numbered private channel under category `1552112181343031326`. The ticket opener, bot, and server owner can see it; the opener can send messages and attach files. The opening post pings `@here`, the owner, and the opener. The opener or owner can close a ticket; closing locks the opener from sending while preserving the conversation.
 
@@ -33,7 +33,7 @@ Add the bot token in the **Nightcrow Bot** Apollo server's Variables page; never
 DISCORD_TOKEN=your Discord bot token
 ```
 
-Optional overrides include `OCR_LANGUAGES`, `SUB_PROOF_CHANNEL_ID`, `FREE_ACCESS_ROLE_ID`, `FREE_PRODUCTS_CHANNEL_ID`, `SUPPORT_CHANNEL_ID`, `RULES_CHANNEL_ID`, and `TICKET_CATEGORY_ID`. The defaults match Nightcrow Studios.
+Optional overrides include `OCR_LANGUAGES`, `SUB_PROOF_CHANNEL_ID`, `FREE_ACCESS_ROLE_ID`, `FREE_PRODUCTS_CHANNEL_ID`, `FREE_ACCESS_INFO_CHANNEL_ID`, `HOW_TO_BUY_CHANNEL_ID`, `SUPPORT_CHANNEL_ID`, `RULES_CHANNEL_ID`, and `TICKET_CATEGORY_ID`. The defaults match Nightcrow Studios.
 
 ## Discord setup
 
