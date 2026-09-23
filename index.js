@@ -143,7 +143,10 @@ client.once(Events.ClientReady, (ready) => {
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || message.channelId !== PROOF_CHANNEL_ID || !message.guild) return;
-  if (message.attachments.size === 0) return;
+  if (message.attachments.size === 0) {
+    await reply(message, 'No screenshot image was received. If you attached one, enable Message Content Intent in the Discord Developer Portal and restart the bot.');
+    return;
+  }
 
   if (message.attachments.size !== 1) {
     await reply(message, 'Please send one screenshot image at a time. Nothing was deleted.');
