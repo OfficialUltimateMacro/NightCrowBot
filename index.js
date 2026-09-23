@@ -9,7 +9,10 @@ const { createWorker } = require('tesseract.js');
 const PROOF_CHANNEL_ID = process.env.SUB_PROOF_CHANNEL_ID || '1551744713688621126';
 const FREE_ACCESS_ROLE_ID = process.env.FREE_ACCESS_ROLE_ID || '1551747469455654963';
 const FREE_PRODUCTS_CHANNEL_ID = process.env.FREE_PRODUCTS_CHANNEL_ID || '1551745615761768569';
-const OCR_LANGUAGES = process.env.OCR_LANGUAGES || 'eng+hin';
+const OCR_LANGUAGES = (process.env.OCR_LANGUAGES || 'eng,hin')
+  .split(/[,+\\s]+/)
+  .map((language) => language.trim())
+  .filter(Boolean);
 const OCR_CACHE_PATH = process.env.OCR_CACHE_PATH || path.join(process.cwd(), 'data', 'ocr-cache');
 const REVIEW_COOLDOWN_MS = 30_000;
 const MAX_PROOF_BYTES = 10 * 1024 * 1024;
@@ -132,7 +135,7 @@ async function reviewProof(bytes) {
 
 client.once(Events.ClientReady, (ready) => {
   console.log('Nightcrow Bot is online as ' + ready.user.tag + '.');
-  console.log('Local OCR languages: ' + OCR_LANGUAGES + '.');
+  console.log('Local OCR languages: ' + OCR_LANGUAGES.join(', ') + '.');
 });
 
 client.on(Events.MessageCreate, async (message) => {
