@@ -10,7 +10,7 @@ const PROOF_CHANNEL_ID = process.env.SUB_PROOF_CHANNEL_ID || '155174471368862112
 const FREE_ACCESS_ROLE_ID = process.env.FREE_ACCESS_ROLE_ID || '1551747469455654963';
 const FREE_PRODUCTS_CHANNEL_ID = process.env.FREE_PRODUCTS_CHANNEL_ID || '1551745615761768569';
 const OCR_LANGUAGES = (process.env.OCR_LANGUAGES || 'eng,hin')
-  .split(/[,+\\s]+/)
+  .split(/[,+\s]+/)
   .map((language) => language.trim())
   .filter(Boolean);
 const OCR_CACHE_PATH = process.env.OCR_CACHE_PATH || path.join(process.cwd(), 'data', 'ocr-cache');
