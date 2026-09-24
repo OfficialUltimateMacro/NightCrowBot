@@ -39,3 +39,11 @@ Optional overrides include `OCR_LANGUAGES`, `SUB_PROOF_CHANNEL_ID`, `FREE_ACCESS
 
 Enable **Server Members Intent** and **Message Content Intent** in Discord Developer Portal → Bot. Give the bot View Channel, Read Message History, Send Messages, Embed Links, Attach Files, Manage Roles, and Manage Channels. Move its role above **Free Products Access** in the server role list.
 
+## Product commands
+
+The server owner or a member with **Manage Server** can use `/product create` to fill out a private, two-step listing form. It collects the name, category, price, summary, an existing HTTPS checkout link, full description, features, included files, optional HTTPS cover image, and product-specific license notes. Crow shows an ephemeral preview and publishes only after **Publish product** is pressed.
+
+Publishing updates `catalog.json` in the Night Crow Studios website repository and announces the new product in the `product-updates` channel. `/product update` publishes product notes to the site feed and Discord; `/product remove` archives the listing while retaining its history. The host needs a `GITHUB_TOKEN` private variable backed by a fine-grained token scoped to `OfficialUltimateMacro/NIGHTCROW_STUDIOS` with **Contents: Read and write**. Set it only in the bot host's environment settings; never send or commit the token. Optional configuration: `STOREFRONT_REPOSITORY`, `STOREFRONT_BRANCH`, `STOREFRONT_CATALOG_PATH`, `STOREFRONT_URL`, `PRODUCT_UPDATES_CHANNEL_ID`, and `GUILD_ID`.
+
+The bot does not create payment products or coupon codes at Whop. Create and configure the offer/code at the checkout provider first, then paste that secure checkout URL into the product form. Website deployment runs through the repository's Cloudflare Pages integration.
+
