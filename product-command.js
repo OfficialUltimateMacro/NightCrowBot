@@ -21,7 +21,7 @@ const productDrafts = new Map();
 function productCommandDefinition() {
   return new SlashCommandBuilder()
     .setName('product')
-    .setDescription('Create and manage Night Crow storefront listings')
+    .setDescription('Create and manage Brightest Studios storefront listings')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((option) => option.setName('create').setDescription('Build a product listing and checkout page'))
     .addSubcommand((option) => option
@@ -97,7 +97,7 @@ function parseLines(value) {
 function productEmbed(product, title = product.name) {
   const embed = new EmbedBuilder()
     .setColor(0x101215)
-    .setAuthor({ name: 'NIGHT CROW STUDIOS' })
+    .setAuthor({ name: 'BRIGHTEST STUDIOS' })
     .setTitle(title)
     .setURL(productPageUrl(product.id))
     .setDescription(product.summary)
@@ -105,7 +105,7 @@ function productEmbed(product, title = product.name) {
       { name: 'Price', value: product.price, inline: true },
       { name: 'Category', value: product.category, inline: true },
     )
-    .setFooter({ text: 'Product details and license • Night Crow Studios' });
+    .setFooter({ text: 'Product details and license • Brightest Studios' });
   if (product.imageUrl) embed.setImage(product.imageUrl);
   return embed;
 }
@@ -134,7 +134,7 @@ async function announceProduct(guild, product) {
 function productPreview(product) {
   const embed = new EmbedBuilder()
     .setColor(0x101215)
-    .setAuthor({ name: 'NIGHT CROW STUDIOS' })
+    .setAuthor({ name: 'BRIGHTEST STUDIOS' })
     .setTitle(product.name)
     .setDescription(product.summary)
     .addFields(
@@ -197,19 +197,19 @@ async function handleCommand(interaction) {
     if (channel) {
       const embed = new EmbedBuilder()
         .setColor(0x101215)
-        .setAuthor({ name: 'NIGHT CROW STUDIOS' })
+        .setAuthor({ name: 'BRIGHTEST STUDIOS' })
         .setTitle(update.title)
         .setDescription(update.details)
         .addFields({ name: 'Product', value: product.name, inline: true })
         .setURL(WEBSITE_URL + '/product-updates.html#' + encodeURIComponent(update.id))
-        .setFooter({ text: 'Night Crow Studios • Product update' });
+        .setFooter({ text: 'Brightest Studios • Product update' });
       await channel.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch((error) => {
         console.error('Website update published, but Discord announcement failed:', error);
       });
     }
   } catch (error) {
     console.error('Product command failed:', error);
-    await interaction.editReply(error.message || 'Product update failed. Check the Nightcrow Bot console.');
+    await interaction.editReply(error.message || 'Product update failed. Check the Bright console.');
   }
 }
 
@@ -380,7 +380,7 @@ async function handlePublishButton(interaction) {
   } catch (error) {
     console.error('Product publish failed:', error);
     await interaction.editReply({
-      content: (error.message || 'Product publish failed. Check the Nightcrow Bot console.') + (draft.whop ? ' The Whop checkout was already created; use Publish product again to retry the website update.' : ''),
+      content: (error.message || 'Product publish failed. Check the Bright console.') + (draft.whop ? ' The Whop checkout was already created; use Publish product again to retry the website update.' : ''),
       embeds: [productPreview(productDraft)],
       components: [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('nightcrow:product:publish:' + interaction.user.id).setLabel('Publish product').setStyle(ButtonStyle.Primary),
