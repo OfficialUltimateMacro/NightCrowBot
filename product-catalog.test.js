@@ -47,6 +47,21 @@ test('product draft normalizes listing and keeps its secure checkout URL', () =>
   assert.match(product.license, /Night Crow Studios Terms/);
 });
 
+test('private product form can be validated before Whop creates its checkout', () => {
+  const product = normalizeProductDraft({
+    name: 'Ocean System',
+    category: 'Roblox systems',
+    price: '$9.99 USD',
+    summary: 'A configurable ocean system.',
+    description: 'A complete ocean system.',
+    features: ['Waves'],
+    includes: ['Model'],
+  }, { requireCheckoutUrl: false });
+
+  assert.equal(product.checkoutUrl, '');
+  assert.equal(product.status, 'draft');
+});
+
 test('catalog accepts only record arrays and caps update history', () => {
   const catalog = normalizeCatalog({
     products: [{ id: 'first' }, null, 'bad'],
