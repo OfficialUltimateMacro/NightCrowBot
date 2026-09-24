@@ -1,0 +1,407 @@
+'use strict';
+
+const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  ModalBuilder,
+  PermissionFlagsBits,
+  SlashCommandBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+} = require('discord.js');
+const { normalizeCatalog, normalizeProductDraft, readCatalog, slugify, writeCatalog } = require('./product-catalog');
+
+const WEBSITE_URL = (process.env.STOREFRONT_URL || 'https://nightcrow-studios.pages.dev').replace(/\/$/, '');
+const PRODUCT_DRAFT_TTL = 20 * 60 * 1000;
+const productDrafts = new Map();
+
+function productCommandDefinition() {
+  return new SlashCommandBuilder()
+    .setName('product')
+    .setDescription('Create and manage Night Crow storefront listings')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand((option) => option.setName('create').setDescription('Build a product listing and checkout page'))
+    .addSubcommand((option) => option
+      .setName('update')
+      .setDescription('Post a product update to the website')
+      .addStringOption((field) => field.setName('product').setDescription('Product ID shown in its page URL').setRequired(true).setMaxLength(64))
+      .addStringOption((field) => field.setName('title').setDescription('Update heading or version').setRequired(true).setMaxLength(100))
+      .addStringOption((field) => field.setName('details').setDescription('What changed').setRequired(true).setMaxLength(1000)))
+    .addSubcommand((option) => option
+      .setName('remove')
+      .setDescription('Unlist a product without deleting its record')
+      .addStringOption((field) => field.setName('product').setDescription('Product ID shown in its page URL').setRequired(true).setMaxLength(64)));
+}
+
+function draftKey(interaction) {
+  return interaction.guildId + ':' + interaction.user.id;
+}
+
+function canManageProducts(interaction) {
+  return Boolean(interaction.guild && (
+    interaction.user.id === interaction.guild.ownerId ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+  ));
+}
+
+function inputRow(id, label, style, maxLength, required, placeholder) {
+  const input = new TextInputBuilder()
+    .setCustomId(id)
+    .setLabel(label)
+    .setStyle(style)
+    .setMaxLength(maxLength)
+    .setRequired(required);
+  if (placeholder) input.setPlaceholder(placeholder);
+  return new ActionRowBuilder().addComponents(input);
+}
+
+function metadataModal() {
+  return new ModalBuilder()
+    .setCustomId('nightcrow:product:metadata')
+    .setTitle('Create product · 1 of 2')
+    .addComponents(
+      inputRow('name', 'Product name', TextInputStyle.Short, 90, true, 'Example: Ocean Waves System'),
+      inputRow('category', 'Category', TextInputStyle.Short, 50, true, 'Systems, VFX, UI, resources…'),
+      inputRow('price', 'Price as shown at checkout', TextInputStyle.Short, 50, true, '$9.99 USD or R$2999'),
+      inputRow('summary', 'Short product summary', TextInputStyle.Paragraph, 180, true, 'One clear sentence for product cards'),
+      inputRow('checkout', 'Existing HTTPS checkout URL', TextInputStyle.Short, 500, true, 'Paste the Whop checkout link you created'),
+    );
+}
+
+function detailsModal() {
+  return new ModalBuilder()
+    .setCustomId('nightcrow:product:details')
+    .setTitle('Create product · 2 of 2')
+    .addComponents(
+      inputRow('description', 'Product description', TextInputStyle.Paragraph, 1800, true, 'What the buyer receives and how it works'),
+      inputRow('features', 'Features, one per line', TextInputStyle.Paragraph, 1000, true, 'Responsive controls\nConfigurable settings'),
+      inputRow('includes', 'Files included, one per line', TextInputStyle.Paragraph, 1000, true, 'Roblox model\nSetup guide'),
+      inputRow('image', 'Public HTTPS cover image URL (optional)', TextInputStyle.Short, 500, false, 'Use a stable URL, not a temporary Discord attachment'),
+      inputRow('license', 'Product-specific license notes (optional)', TextInputStyle.Paragraph, 1800, false, 'Leave blank to use the standard site license'),
+    );
+}
+
+function productPageUrl(productId) {
+  return WEBSITE_URL + '/product.html?slug=' + encodeURIComponent(productId);
+}
+
+function parseLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*[-•*]\s*/, '').trim())
+    .filter(Boolean);
+}
+
+function productEmbed(product, title = product.name) {
+  const embed = new EmbedBuilder()
+    .setColor(0x101215)
+    .setAuthor({ name: 'NIGHT CROW STUDIOS' })
+    .setTitle(title)
+    .setURL(productPageUrl(product.id))
+    .setDescription(product.summary)
+    .addFields(
+      { name: 'Price', value: product.price, inline: true },
+      { name: 'Category', value: product.category, inline: true },
+    )
+    .setFooter({ text: 'Product details and license • Night Crow Studios' });
+  if (product.imageUrl) embed.setImage(product.imageUrl);
+  return embed;
+}
+
+async function updatesChannel(guild) {
+  const channelId = process.env.PRODUCT_UPDATES_CHANNEL_ID;
+  const channel = channelId
+    ? await guild.channels.fetch(channelId).catch(() => null)
+    : guild.channels.cache.find((candidate) => candidate.name === 'product-updates');
+  return channel?.isTextBased() ? channel : null;
+}
+
+async function announceProduct(guild, product) {
+  const channel = await updatesChannel(guild);
+  if (!channel) return;
+
+  await channel.send({
+    embeds: [productEmbed(product)],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setLabel('View product').setStyle(ButtonStyle.Link).setURL(productPageUrl(product.id)),
+    )],
+    allowedMentions: { parse: [] },
+  });
+}
+
+function productPreview(product) {
+  const embed = new EmbedBuilder()
+    .setColor(0x101215)
+    .setAuthor({ name: 'NIGHT CROW STUDIOS' })
+    .setTitle(product.name)
+    .setDescription(product.summary)
+    .addFields(
+      { name: 'Price', value: product.price, inline: true },
+      { name: 'Category', value: product.category, inline: true },
+      { name: 'Checkout', value: 'HTTPS checkout link saved', inline: true },
+    )
+    .setFooter({ text: 'Review it, then choose Publish to make it public.' });
+  if (product.imageUrl) embed.setImage(product.imageUrl);
+  return embed;
+}
+
+async function createProduct(interaction) {
+  await interaction.showModal(metadataModal());
+}
+
+async function handleCommand(interaction) {
+  if (!canManageProducts(interaction)) {
+    await interaction.reply({ content: 'Only the server owner or a member with Manage Server can publish products.', ephemeral: true });
+    return;
+  }
+
+  const subcommand = interaction.options.getSubcommand();
+  if (subcommand === 'create') return createProduct(interaction);
+
+  await interaction.deferReply({ ephemeral: true });
+  try {
+    const catalog = normalizeCatalog(await readCatalog());
+    const productId = slugify(interaction.options.getString('product', true));
+    const product = catalog.products.find((item) => item.id === productId && item.status !== 'archived');
+    if (!product) throw new Error('That product ID is not currently listed on the storefront.');
+
+    if (subcommand === 'remove') {
+      product.status = 'archived';
+      product.updatedAt = new Date().toISOString();
+      await writeCatalog(catalog, 'Unlist storefront product: ' + product.id);
+      await interaction.editReply('Unlisted **' + product.name + '**. The product record and update history were kept. Cloudflare Pages will update after the GitHub deployment finishes.');
+      return;
+    }
+
+    const title = interaction.options.getString('title', true).trim();
+    const details = interaction.options.getString('details', true).trim();
+    if (!title || !details) throw new Error('Both the update title and details are required.');
+
+    const update = {
+      id: 'update-' + Date.now().toString(36),
+      productId: product.id,
+      productName: product.name,
+      title: title.slice(0, 100),
+      details: details.slice(0, 1000),
+      createdAt: new Date().toISOString(),
+    };
+    catalog.updates.unshift(update);
+    catalog.updates = catalog.updates.slice(0, 100);
+    product.updatedAt = update.createdAt;
+    await writeCatalog(catalog, 'Post product update: ' + product.id);
+    await interaction.editReply('Posted the update for **' + product.name + '** to the website. Cloudflare Pages will refresh after the GitHub deployment finishes.');
+
+    const channel = await updatesChannel(interaction.guild);
+    if (channel) {
+      const embed = new EmbedBuilder()
+        .setColor(0x101215)
+        .setAuthor({ name: 'NIGHT CROW STUDIOS' })
+        .setTitle(update.title)
+        .setDescription(update.details)
+        .addFields({ name: 'Product', value: product.name, inline: true })
+        .setURL(WEBSITE_URL + '/product-updates.html#' + encodeURIComponent(update.id))
+        .setFooter({ text: 'Night Crow Studios • Product update' });
+      await channel.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch((error) => {
+        console.error('Website update published, but Discord announcement failed:', error);
+      });
+    }
+  } catch (error) {
+    console.error('Product command failed:', error);
+    await interaction.editReply(error.message || 'Product update failed. Check the Nightcrow Bot console.');
+  }
+}
+
+async function handleMetadataSubmit(interaction) {
+  if (!canManageProducts(interaction)) {
+    await interaction.reply({ content: 'Only the server owner or a member with Manage Server can publish products.', ephemeral: true });
+    return;
+  }
+
+  const key = draftKey(interaction);
+  const draft = {
+    name: interaction.fields.getTextInputValue('name').trim(),
+    category: interaction.fields.getTextInputValue('category').trim(),
+    price: interaction.fields.getTextInputValue('price').trim(),
+    summary: interaction.fields.getTextInputValue('summary').trim(),
+    checkoutUrl: interaction.fields.getTextInputValue('checkout').trim(),
+    createdAt: Date.now(),
+  };
+
+  try {
+    normalizeProductDraft({ ...draft, description: 'Draft description', features: [], includes: [] });
+    productDrafts.set(key, draft);
+    await interaction.reply({
+      content: 'Product basics saved. Continue with the page description, features, files, and license.',
+      components: [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('nightcrow:product:details:' + interaction.user.id).setLabel('Continue setup').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('nightcrow:product:cancel:' + interaction.user.id).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+      )],
+      ephemeral: true,
+    });
+  } catch (error) {
+    await interaction.reply({ content: error.message, ephemeral: true });
+  }
+}
+
+async function handleDetailsButton(interaction) {
+  if (!canManageProducts(interaction) || interaction.customId.split(':').at(-1) !== interaction.user.id) {
+    await interaction.reply({ content: 'This product draft belongs to another staff member.', ephemeral: true });
+    return;
+  }
+
+  const draft = productDrafts.get(draftKey(interaction));
+  if (!draft || Date.now() - draft.createdAt > PRODUCT_DRAFT_TTL) {
+    productDrafts.delete(draftKey(interaction));
+    await interaction.reply({ content: 'That draft expired. Run `/product create` to start again.', ephemeral: true });
+    return;
+  }
+
+  await interaction.showModal(detailsModal());
+}
+
+async function handleDetailsSubmit(interaction) {
+  if (!canManageProducts(interaction)) {
+    await interaction.reply({ content: 'Only the server owner or a member with Manage Server can publish products.', ephemeral: true });
+    return;
+  }
+
+  const key = draftKey(interaction);
+  const draft = productDrafts.get(key);
+  if (!draft || Date.now() - draft.createdAt > PRODUCT_DRAFT_TTL) {
+    productDrafts.delete(key);
+    await interaction.reply({ content: 'That draft expired. Run `/product create` to start again.', ephemeral: true });
+    return;
+  }
+
+  let product;
+  try {
+    product = normalizeProductDraft({
+      ...draft,
+      description: interaction.fields.getTextInputValue('description'),
+      features: parseLines(interaction.fields.getTextInputValue('features')),
+      includes: parseLines(interaction.fields.getTextInputValue('includes')),
+      imageUrl: interaction.fields.getTextInputValue('image'),
+      license: interaction.fields.getTextInputValue('license'),
+    });
+  } catch (error) {
+    await interaction.reply({ content: error.message, ephemeral: true });
+    return;
+  }
+
+  productDrafts.set(key, { product, createdAt: draft.createdAt });
+  await interaction.reply({
+    content: 'Check the listing below. Nothing is public until you press **Publish product**.',
+    embeds: [productPreview(product)],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('nightcrow:product:publish:' + interaction.user.id).setLabel('Publish product').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('nightcrow:product:cancel:' + interaction.user.id).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+    )],
+    ephemeral: true,
+  });
+}
+
+async function handlePublishButton(interaction) {
+  if (!canManageProducts(interaction) || interaction.customId.split(':').at(-1) !== interaction.user.id) {
+    await interaction.reply({ content: 'This product draft belongs to another staff member.', ephemeral: true });
+    return;
+  }
+
+  await interaction.deferUpdate();
+  const key = draftKey(interaction);
+  const draft = productDrafts.get(key);
+  if (!draft?.product || Date.now() - draft.createdAt > PRODUCT_DRAFT_TTL) {
+    productDrafts.delete(key);
+    await interaction.editReply({ content: 'That draft expired. Run `/product create` to start again.', embeds: [], components: [] });
+    return;
+  }
+
+  const product = { ...draft.product, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  try {
+    const catalog = normalizeCatalog(await readCatalog());
+    if (catalog.products.some((item) => item.id === product.id && item.status !== 'archived')) {
+      throw new Error('A product with that URL ID is already listed. Change its name or use `/product update` for changes.');
+    }
+
+    catalog.products.unshift(product);
+    catalog.updates.unshift({
+      id: 'launch-' + product.id,
+      productId: product.id,
+      productName: product.name,
+      title: 'New product',
+      details: product.summary,
+      createdAt: product.createdAt,
+    });
+    await writeCatalog(catalog, 'Publish storefront product: ' + product.id);
+    productDrafts.delete(key);
+    const pageUrl = productPageUrl(product.id);
+    await interaction.editReply({
+      content: 'Published **' + product.name + '**. Product page: ' + pageUrl + '. Cloudflare Pages will update after its GitHub deployment completes.',
+      embeds: [],
+      components: [],
+    });
+    await announceProduct(interaction.guild, product).catch((error) => {
+      console.error('Product page published, but its Discord embed could not be sent:', error);
+    });
+  } catch (error) {
+    console.error('Product publish failed:', error);
+    await interaction.editReply({ content: error.message || 'Product publish failed. Check the Nightcrow Bot console.', embeds: [], components: [] });
+  }
+}
+
+async function handleCancelButton(interaction) {
+  if (interaction.customId.split(':').at(-1) !== interaction.user.id) {
+    await interaction.reply({ content: 'This product draft belongs to another staff member.', ephemeral: true });
+    return;
+  }
+
+  productDrafts.delete(draftKey(interaction));
+  await interaction.update({ content: 'Product draft cancelled.', embeds: [], components: [] });
+}
+
+async function registerProductCommand(client) {
+  const configuredGuildId = process.env.GUILD_ID;
+  const guild = configuredGuildId
+    ? client.guilds.cache.get(configuredGuildId) || await client.guilds.fetch(configuredGuildId).catch(() => null)
+    : client.guilds.cache.first();
+
+  if (!guild) {
+    console.warn('Skipping /product registration: set GUILD_ID or add Crow to a guild.');
+    return;
+  }
+
+  const existing = await guild.commands.fetch();
+  const current = existing.find((command) => command.name === 'product');
+  const definition = productCommandDefinition().toJSON();
+  if (current) await guild.commands.edit(current.id, definition);
+  else await guild.commands.create(definition);
+  console.log('Registered /product in guild ' + guild.id + '.');
+}
+
+async function handleProductInteraction(interaction) {
+  if (interaction.isChatInputCommand() && interaction.commandName === 'product') {
+    await handleCommand(interaction);
+    return true;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === 'nightcrow:product:metadata') {
+    await handleMetadataSubmit(interaction);
+    return true;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === 'nightcrow:product:details') {
+    await handleDetailsSubmit(interaction);
+    return true;
+  }
+
+  if (!interaction.isButton()) return false;
+  if (interaction.customId.startsWith('nightcrow:product:details:')) await handleDetailsButton(interaction);
+  else if (interaction.customId.startsWith('nightcrow:product:publish:')) await handlePublishButton(interaction);
+  else if (interaction.customId.startsWith('nightcrow:product:cancel:')) await handleCancelButton(interaction);
+  else return false;
+  return true;
+}
+
+module.exports = { handleProductInteraction, registerProductCommand };
+
