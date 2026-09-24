@@ -14,7 +14,7 @@ const {
 const { normalizeCatalog, normalizeProductDraft, readCatalog, slugify, writeCatalog } = require('./product-catalog');
 const { createWhopCheckout, formatUsdPrice } = require('./whop-checkout');
 
-const WEBSITE_URL = (process.env.STOREFRONT_URL || 'https://nightcrow-studios.pages.dev').replace(/\/$/, '');
+const WEBSITE_URL = (process.env.STOREFRONT_URL || 'https://brighteststudios.com').replace(/\/$/, '');
 const PRODUCT_DRAFT_TTL = 20 * 60 * 1000;
 const productDrafts = new Map();
 
