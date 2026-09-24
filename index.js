@@ -16,6 +16,7 @@ const {
   StringSelectMenuBuilder,
 } = require('discord.js');
 const { createWorker } = require('tesseract.js');
+const { handleProductInteraction, registerProductCommand } = require('./product-command');
 
 const PROOF_CHANNEL_ID = process.env.SUB_PROOF_CHANNEL_ID || '1551744713688621126';
 const FREE_ACCESS_ROLE_ID = process.env.FREE_ACCESS_ROLE_ID || '1551747469455654963';
@@ -261,14 +262,23 @@ async function openTicket(interaction, topic) {
     permissionOverwrites: ticketPermissions(guild, user.id, ownerId),
   });
 
-  await channel.send({
-    content: '@here <@' + ownerId + '> <@' + user.id + '>',
-    embeds: [channelEmbed(typeName, 'Describe what you need help with and attach any relevant images. Staff will reply here.', 'Nightcrow Studios • Ticket #' + number)],
-    components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('nightcrow:ticket-close').setLabel('Close ticket').setStyle(ButtonStyle.Secondary),
-    )],
-    allowedMentions: { parse: ['everyone'], users: [ownerId, user.id] },
-  });
+  const recipients = [...new Set([ownerId, user.id])];
+  try {
+    await channel.send({
+      content: ['@here', ...recipients.map((id) => '<@' + id + '>')].join(' '),
+      embeds: [channelEmbed(typeName, 'Describe what you need help with and attach any relevant images. Staff will reply here.', 'Nightcrow Studios • Ticket #' + number)],
+      components: [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('nightcrow:ticket-close').setLabel('Close ticket').setStyle(ButtonStyle.Secondary),
+      )],
+      allowedMentions: { parse: ['everyone'], users: recipients },
+    });
+  } catch (error) {
+    console.error('Ticket #' + number + ' was created but its opening post failed:', error);
+    await channel.delete('Removing an empty ticket after its opening post failed').catch((cleanupError) => {
+      console.error('Could not remove partial ticket #' + number + ':', cleanupError);
+    });
+    throw error;
+  }
 
   await interaction.editReply('Your private ticket is open: <#' + channel.id + '>');
 }
@@ -308,6 +318,7 @@ async function closeTicket(interaction) {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (await handleProductInteraction(interaction)) return;
     if (interaction.isStringSelectMenu() && interaction.customId === 'nightcrow:support-topic') {
       await openTicket(interaction, interaction.values[0]);
       return;
@@ -418,6 +429,9 @@ client.once(Events.ClientReady, (ready) => {
   console.log('Nightcrow Bot is online as ' + ready.user.tag + '.');
   console.log('Local OCR languages: ' + OCR_LANGUAGES.join(', ') + '.');
   ensureServerMessages();
+  registerProductCommand(ready).catch((error) => {
+    console.error('Could not register the /product command:', error);
+  });
   getOcrWorker()
     .then(() => console.log('Local OCR worker ready.'))
     .catch((error) => console.error('Local OCR worker failed to initialize:', error));
