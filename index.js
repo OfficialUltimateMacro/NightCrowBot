@@ -270,7 +270,7 @@ async function openTicket(interaction, topic) {
       components: [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('nightcrow:ticket-close').setLabel('Close ticket').setStyle(ButtonStyle.Secondary),
       )],
-      allowedMentions: { parse: ['everyone'], users: recipients },
+      allowedMentions: { parse: ['everyone', 'users'] },
     });
   } catch (error) {
     console.error('Ticket #' + number + ' was created but its opening post failed:', error);
