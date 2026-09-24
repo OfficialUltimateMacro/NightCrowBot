@@ -43,7 +43,7 @@ function lineList(value, label) {
     .map((line) => cleanText(line, label, 180, true));
 }
 
-function normalizeProductDraft(input) {
+function normalizeProductDraft(input, options = {}) {
   const name = cleanText(input.name, 'Product name', 90, true);
   const id = slugify(input.id || name);
   if (!id) throw new Error('Product name needs at least one English letter or number.');
@@ -55,12 +55,14 @@ function normalizeProductDraft(input) {
     price: cleanText(input.price, 'Price', 50, true),
     summary: cleanText(input.summary, 'Short description', 180, true),
     description: cleanText(input.description, 'Product description', 1800, true),
-    checkoutUrl: httpsUrl(input.checkoutUrl, 'Checkout URL', true),
+    checkoutUrl: httpsUrl(input.checkoutUrl, 'Checkout URL', options.requireCheckoutUrl !== false),
+    whopProductId: cleanText(input.whopProductId, 'Whop product ID', 100),
+    whopPlanId: cleanText(input.whopPlanId, 'Whop plan ID', 100),
     imageUrl: httpsUrl(input.imageUrl, 'Cover image URL'),
     features: lineList(input.features, 'Feature'),
     includes: lineList(input.includes, 'Included item'),
     license: cleanText(input.license, 'Product license', 1800) || 'Use is governed by the Night Crow Studios Terms and the license shown at checkout.',
-    status: 'published',
+    status: input.checkoutUrl ? 'published' : 'draft',
   };
 }
 
