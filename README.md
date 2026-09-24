@@ -35,15 +35,19 @@ DISCORD_TOKEN=your Discord bot token
 
 Optional overrides include `OCR_LANGUAGES`, `SUB_PROOF_CHANNEL_ID`, `FREE_ACCESS_ROLE_ID`, `FREE_PRODUCTS_CHANNEL_ID`, `FREE_ACCESS_INFO_CHANNEL_ID`, `HOW_TO_BUY_CHANNEL_ID`, `SUPPORT_CHANNEL_ID`, `RULES_CHANNEL_ID`, and `TICKET_CATEGORY_ID`. The defaults match Nightcrow Studios.
 
+## Whop checkout setup
+
+Add `WHOP_API_KEY` as a private variable in the Nightcrow Bot host. Never put it in the website, a committed file, or Discord. The key must be allowed to create account products, one-time plans, and promo codes. `WHOP_ACCOUNT_ID` defaults to `biz_0bsVpFW750nDlH`; change it only if you sell through a different Whop business. `WHOP_API_VERSION_DATE` is optional and defaults to `2026-09-23`.
+
 ## Discord setup
 
 Enable **Server Members Intent** and **Message Content Intent** in Discord Developer Portal → Bot. Give the bot View Channel, Read Message History, Send Messages, Embed Links, Attach Files, Manage Roles, and Manage Channels. Move its role above **Free Products Access** in the server role list.
 
 ## Product commands
 
-The server owner or a member with **Manage Server** can use `/product create` to fill out a private, two-step listing form. It collects the name, category, price, summary, an existing HTTPS checkout link, full description, features, included files, optional HTTPS cover image, and product-specific license notes. Crow shows an ephemeral preview and publishes only after **Publish product** is pressed.
+The server owner or a member with **Manage Server** can use `/product create` to fill out a private, two-step listing form. It collects the name, category, one-time USD price, summary, full description, features, included files, optional HTTPS cover image, and product-specific license notes. Crow shows an ephemeral preview. Only after **Publish product** is pressed does the bot create a Whop product and one-time plan, then store Whop's returned secure checkout URL in the website catalog.
 
 Publishing updates `catalog.json` in the Night Crow Studios website repository and announces the new product in the `product-updates` channel. `/product update` publishes product notes to the site feed and Discord; `/product remove` archives the listing while retaining its history. The host needs a `GITHUB_TOKEN` private variable backed by a fine-grained token scoped to `OfficialUltimateMacro/NIGHTCROW_STUDIOS` with **Contents: Read and write**. Set it only in the bot host's environment settings; never send or commit the token. Optional configuration: `STOREFRONT_REPOSITORY`, `STOREFRONT_BRANCH`, `STOREFRONT_CATALOG_PATH`, `STOREFRONT_URL`, `PRODUCT_UPDATES_CHANNEL_ID`, and `GUILD_ID`.
 
-The bot does not create payment products or coupon codes at Whop. Create and configure the offer/code at the checkout provider first, then paste that secure checkout URL into the product form. Website deployment runs through the repository's Cloudflare Pages integration.
+The first publish also attempts to create the account-wide `EASYMONEY` promotion for 5% off, limited to one use per customer, so it can be used with products added later. If Whop reports that the code already exists or the API key lacks promo permissions, Crow will still publish the checkout and tell you to verify the existing code's discount and product scope in Whop. Product and plan requests use stable idempotency keys so retries reuse the same Whop resources. If a catalog commit fails after checkout creation, retry **Publish product** on the same draft to finish the website update. Website deployment runs through the repository's Cloudflare Pages integration.
 
