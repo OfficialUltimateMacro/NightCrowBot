@@ -8,7 +8,7 @@ function readConfig(options = {}) {
   const env = options.env || process.env;
   const token = options.token || env.WHOP_API_KEY;
   if (!token) {
-    throw new Error('Whop is not configured. Add WHOP_API_KEY to the Nightcrow Bot host variables.');
+    throw new Error('Whop is not configured. Add WHOP_API_KEY to the Bright host variables.');
   }
 
   return {
