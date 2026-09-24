@@ -61,7 +61,7 @@ function normalizeProductDraft(input, options = {}) {
     imageUrl: httpsUrl(input.imageUrl, 'Cover image URL'),
     features: lineList(input.features, 'Feature'),
     includes: lineList(input.includes, 'Included item'),
-    license: cleanText(input.license, 'Product license', 1800) || 'Use is governed by the Night Crow Studios Terms and the license shown at checkout.',
+    license: cleanText(input.license, 'Product license', 1800) || 'Use is governed by the Brightest Studios Terms and the license shown at checkout.',
     status: input.checkoutUrl ? 'published' : 'draft',
   };
 }
@@ -77,7 +77,7 @@ function normalizeCatalog(value) {
 
 function githubConfig(options = {}) {
   const token = options.token || process.env.GITHUB_TOKEN;
-  if (!token) throw new Error('The product publisher is not configured yet. Add GITHUB_TOKEN to the Nightcrow Bot host variables.');
+  if (!token) throw new Error('The product publisher is not configured yet. Add GITHUB_TOKEN to the Bright host variables.');
 
   const repository = options.repository || process.env.STOREFRONT_REPOSITORY || DEFAULT_REPOSITORY;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('STOREFRONT_REPOSITORY must use owner/repository format.');
@@ -103,7 +103,7 @@ async function githubRequest(config, method, body) {
       Authorization: 'Bearer ' + config.token,
       'X-GitHub-Api-Version': '2022-11-28',
       'Content-Type': 'application/json',
-      'User-Agent': 'Nightcrow-Studios-Storefront',
+      'User-Agent': 'Brightest-Studios-Storefront',
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
