@@ -12,6 +12,7 @@ const {
   TextInputStyle,
 } = require('discord.js');
 const { normalizeCatalog, normalizeProductDraft, readCatalog, slugify, writeCatalog } = require('./product-catalog');
+const { createWhopCheckout, formatUsdPrice } = require('./whop-checkout');
 
 const WEBSITE_URL = (process.env.STOREFRONT_URL || 'https://nightcrow-studios.pages.dev').replace(/\/$/, '');
 const PRODUCT_DRAFT_TTL = 20 * 60 * 1000;
@@ -64,9 +65,8 @@ function metadataModal() {
     .addComponents(
       inputRow('name', 'Product name', TextInputStyle.Short, 90, true, 'Example: Ocean Waves System'),
       inputRow('category', 'Category', TextInputStyle.Short, 50, true, 'Systems, VFX, UI, resources…'),
-      inputRow('price', 'Price as shown at checkout', TextInputStyle.Short, 50, true, '$9.99 USD or R$2999'),
+      inputRow('price', 'One-time price in USD', TextInputStyle.Short, 50, true, '9.99'),
       inputRow('summary', 'Short product summary', TextInputStyle.Paragraph, 180, true, 'One clear sentence for product cards'),
-      inputRow('checkout', 'Existing HTTPS checkout URL', TextInputStyle.Short, 500, true, 'Paste the Whop checkout link you created'),
     );
 }
 
@@ -140,7 +140,7 @@ function productPreview(product) {
     .addFields(
       { name: 'Price', value: product.price, inline: true },
       { name: 'Category', value: product.category, inline: true },
-      { name: 'Checkout', value: 'HTTPS checkout link saved', inline: true },
+      { name: 'Checkout', value: 'Whop one-time checkout is created when you publish', inline: true },
     )
     .setFooter({ text: 'Review it, then choose Publish to make it public.' });
   if (product.imageUrl) embed.setImage(product.imageUrl);
@@ -220,17 +220,24 @@ async function handleMetadataSubmit(interaction) {
   }
 
   const key = draftKey(interaction);
+  let price;
+  try {
+    price = formatUsdPrice(interaction.fields.getTextInputValue('price'));
+  } catch (error) {
+    await interaction.reply({ content: error.message, ephemeral: true });
+    return;
+  }
+
   const draft = {
     name: interaction.fields.getTextInputValue('name').trim(),
     category: interaction.fields.getTextInputValue('category').trim(),
-    price: interaction.fields.getTextInputValue('price').trim(),
+    price,
     summary: interaction.fields.getTextInputValue('summary').trim(),
-    checkoutUrl: interaction.fields.getTextInputValue('checkout').trim(),
     createdAt: Date.now(),
   };
 
   try {
-    normalizeProductDraft({ ...draft, description: 'Draft description', features: [], includes: [] });
+    normalizeProductDraft({ ...draft, description: 'Draft description', features: [], includes: [] }, { requireCheckoutUrl: false });
     productDrafts.set(key, draft);
     await interaction.reply({
       content: 'Product basics saved. Continue with the page description, features, files, and license.',
@@ -284,13 +291,13 @@ async function handleDetailsSubmit(interaction) {
       includes: parseLines(interaction.fields.getTextInputValue('includes')),
       imageUrl: interaction.fields.getTextInputValue('image'),
       license: interaction.fields.getTextInputValue('license'),
-    });
+    }, { requireCheckoutUrl: false });
   } catch (error) {
     await interaction.reply({ content: error.message, ephemeral: true });
     return;
   }
 
-  productDrafts.set(key, { product, createdAt: draft.createdAt });
+  productDrafts.set(key, { product, createdAt: draft.createdAt, publishing: false });
   await interaction.reply({
     content: 'Check the listing below. Nothing is public until you press **Publish product**.',
     embeds: [productPreview(product)],
@@ -308,21 +315,42 @@ async function handlePublishButton(interaction) {
     return;
   }
 
-  await interaction.deferUpdate();
   const key = draftKey(interaction);
   const draft = productDrafts.get(key);
   if (!draft?.product || Date.now() - draft.createdAt > PRODUCT_DRAFT_TTL) {
+    await interaction.deferUpdate();
     productDrafts.delete(key);
     await interaction.editReply({ content: 'That draft expired. Run `/product create` to start again.', embeds: [], components: [] });
     return;
   }
+  if (draft.publishing) {
+    await interaction.reply({ content: 'This product is already being published. Give it a moment.', ephemeral: true });
+    return;
+  }
+  draft.publishing = true;
+  await interaction.deferUpdate();
 
-  const product = { ...draft.product, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  const productDraft = draft.product;
   try {
     const catalog = normalizeCatalog(await readCatalog());
-    if (catalog.products.some((item) => item.id === product.id && item.status !== 'archived')) {
+    if (catalog.products.some((item) => item.id === productDraft.id && item.status !== 'archived')) {
       throw new Error('A product with that URL ID is already listed. Change its name or use `/product update` for changes.');
     }
+
+    const whop = draft.whop || await createWhopCheckout(productDraft);
+    draft.whop = whop;
+    productDrafts.set(key, draft);
+    const publishedAt = new Date().toISOString();
+    const product = {
+      ...normalizeProductDraft({
+        ...productDraft,
+        checkoutUrl: whop.checkoutUrl,
+        whopProductId: whop.productId,
+        whopPlanId: whop.planId,
+      }),
+      createdAt: publishedAt,
+      updatedAt: publishedAt,
+    };
 
     catalog.products.unshift(product);
     catalog.updates.unshift({
@@ -336,8 +364,13 @@ async function handlePublishButton(interaction) {
     await writeCatalog(catalog, 'Publish storefront product: ' + product.id);
     productDrafts.delete(key);
     const pageUrl = productPageUrl(product.id);
+    const promoNote = whop.promo.status === 'created'
+      ? ' The 5% EASYMONEY code was created for the Whop account.'
+      : whop.promo.status === 'already-exists'
+        ? ' EASYMONEY already exists in Whop; verify it is 5% off and applies to all products.'
+        : ' The product checkout works, but EASYMONEY could not be verified: ' + (whop.promo.message || 'check the Whop promo-code settings.') + '.';
     await interaction.editReply({
-      content: 'Published **' + product.name + '**. Product page: ' + pageUrl + '. Cloudflare Pages will update after its GitHub deployment completes.',
+      content: 'Published **' + product.name + '**. Product page: ' + pageUrl + '. Whop checkout: ' + product.checkoutUrl + '. Cloudflare Pages will update after its GitHub deployment completes.' + promoNote,
       embeds: [],
       components: [],
     });
@@ -346,7 +379,16 @@ async function handlePublishButton(interaction) {
     });
   } catch (error) {
     console.error('Product publish failed:', error);
-    await interaction.editReply({ content: error.message || 'Product publish failed. Check the Nightcrow Bot console.', embeds: [], components: [] });
+    await interaction.editReply({
+      content: (error.message || 'Product publish failed. Check the Nightcrow Bot console.') + (draft.whop ? ' The Whop checkout was already created; use Publish product again to retry the website update.' : ''),
+      embeds: [productPreview(productDraft)],
+      components: [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('nightcrow:product:publish:' + interaction.user.id).setLabel('Publish product').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('nightcrow:product:cancel:' + interaction.user.id).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+      )],
+    });
+  } finally {
+    if (productDrafts.has(key)) draft.publishing = false;
   }
 }
 
