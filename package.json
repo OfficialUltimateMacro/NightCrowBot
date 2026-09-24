@@ -4,7 +4,7 @@
   "private": true,
   "description": "Nightcrow Studios Discord automation bot",
   "main": "index.js",
-  "scripts": { "start": "node index.js", "check": "node --check index.js && node --check product-command.js && node --check product-catalog.js && node --test product-catalog.test.js" },
+  "scripts": { "start": "node index.js", "check": "node --check index.js && node --check product-command.js && node --check product-catalog.js && node --check whop-checkout.js && node --test product-catalog.test.js whop-checkout.test.js" },
   "engines": { "node": ">=20" },
   "dependencies": {
     "discord.js": "^14.25.1",
