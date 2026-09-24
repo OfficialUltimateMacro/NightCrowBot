@@ -70,7 +70,7 @@ const client = new Client({
 function channelEmbed(title, description, footer, fields = []) {
   return new EmbedBuilder()
     .setColor(0x0b0b0d)
-    .setAuthor({ name: 'NIGHTCROW STUDIOS' })
+    .setAuthor({ name: 'BRIGHTEST STUDIOS' })
     .setTitle(title)
     .setDescription(description)
     .addFields(fields)
@@ -82,7 +82,7 @@ function supportPanel() {
     embeds: [channelEmbed(
       'Support',
       'Choose a topic below to open a private ticket. Only you and the server owner can see it.',
-      'Nightcrow Studios • Support',
+      'Brightest Studios • Support',
       [
         { name: 'Product Support', value: 'Help with a purchase, product, or bug.', inline: true },
         { name: 'General Support', value: 'Questions about the store or server.', inline: true },
@@ -100,39 +100,46 @@ function supportPanel() {
   };
 }
 
+const LEGACY_MANAGED_MARKERS = new Set([
+  'Nightcrow Studios • Support',
+  'Nightcrow Studios • Rules v1',
+  'Nightcrow Studios • Free access v1',
+  'Nightcrow Studios • How to buy v1',
+]);
+
 const managedMessages = [
   {
     channelId: RULES_CHANNEL_ID,
-    marker: 'Nightcrow Studios • Rules v1',
+    marker: 'Brightest Studios • Rules v1',
     payload: { embeds: [channelEmbed(
       'Server rules',
-      'Keep Nightcrow Studios welcoming, safe, and useful for everyone.',
-      'Nightcrow Studios • Rules v1',
+      'Keep Brightest Studios welcoming, safe, and useful for everyone.',
+      'Brightest Studios • Rules v1',
       [
         { name: 'Community', value: 'Be respectful. No harassment, hate speech, threats, NSFW content, spam, flooding, or unsolicited advertising.' },
         { name: 'Safety', value: 'Keep posts in the right channels. Do not promote illegal activity, cheating, exploits, or harmful files. Follow Discord’s Terms and Community Guidelines.' },
         { name: 'Privacy', value: 'Never post passwords, bot tokens, payment details, addresses, or anyone else’s private information.' },
-        { name: 'Product use', value: 'Use each product under its included license. Do not share, leak, reupload, or resell the product files as standalone assets. Keep included credits and do not claim Nightcrow Studios work as your own.' },
+        { name: 'Product use', value: 'Use each product under its included license. Do not share, leak, reupload, or resell the product files as standalone assets. Keep included credits and do not claim Brightest Studios work as your own.' },
         { name: 'Need help?', value: 'Open a support ticket for purchase or product questions. Never send staff your password or payment credentials.' },
       ],
     )] },
   },
   {
     channelId: FREE_ACCESS_INFO_CHANNEL_ID,
-    marker: 'Nightcrow Studios • Free access v1',
+    marker: 'Brightest Studios • Free access v1',
     payload: { embeds: [channelEmbed(
       'Free product access',
-      'Subscribe to [Nightcrow Studios on YouTube](https://www.youtube.com/@RBLXNIGHTCROWSTUDIOS) to get access to <#' + FREE_PRODUCTS_CHANNEL_ID + '>. Then post one clear image showing that you are subscribed in <#' + PROOF_CHANNEL_ID + '>. Crow will check it and add the free access role when the proof passes.',
-      'Nightcrow Studios • Free access v1',
+      'Subscribe to [Brightest Studios on YouTube](https://www.youtube.com/@RBLXNIGHTCROWSTUDIOS) to get access to <#' + FREE_PRODUCTS_CHANNEL_ID + '>. Then post one clear image showing that you are subscribed in <#' + PROOF_CHANNEL_ID + '>. Bright will check it and add the free access role when the proof passes.',
+      'Brightest Studios • Free access v1',
     )] },
   },
   {
     channelId: HOW_TO_BUY_CHANNEL_ID,
-    marker: 'Nightcrow Studios • How to buy v1',
+    marker: 'Brightest Studios • How to buy v1',
     payload: { embeds: [channelEmbed(
       'How to buy',
       'Go to [brighteststudios.com](https://brighteststudios.com) and buy any product. Use code **EasyMoney** for **5% off** your purchase. The code can only be used once.',
-      'Nightcrow Studios • How to buy v1',
+      'Brightest Studios • How to buy v1',
     )] },
   },
 ];
@@ -145,7 +152,7 @@ async function upsertManagedMessage(channelId, marker, payload) {
 
   const messages = await channel.messages.fetch({ limit: 100 });
   const current = messages.find((message) =>
-    message.author.id === client.user.id && message.embeds.some((embed) => embed.footer?.text === marker),
+    message.author.id === client.user.id && message.embeds.some((embed) => embed.footer?.text === marker || LEGACY_MANAGED_MARKERS.has(embed.footer?.text)),
   );
 
   if (current) {
@@ -165,7 +172,7 @@ async function ensureServerMessages() {
   }
 
   try {
-    await upsertManagedMessage(SUPPORT_CHANNEL_ID, 'Nightcrow Studios • Support', supportPanel());
+    await upsertManagedMessage(SUPPORT_CHANNEL_ID, 'Brightest Studios • Support', supportPanel());
   } catch (error) {
     console.error('Could not update the support panel:', error);
   }
@@ -226,7 +233,7 @@ async function openTicket(interaction, topic) {
   await interaction.deferReply({ ephemeral: true });
   const { guild, user } = interaction;
   if (!guild) {
-    await interaction.editReply('Tickets can only be opened inside the Nightcrow Studios server.');
+    await interaction.editReply('Tickets can only be opened inside the Brightest Studios server.');
     return;
   }
 
@@ -238,7 +245,7 @@ async function openTicket(interaction, topic) {
 
   const botMember = guild.members.me || await guild.members.fetch(client.user.id);
   if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
-    await interaction.editReply('Ticket channels are not enabled yet. Crow needs the Manage Channels permission to create private tickets.');
+    await interaction.editReply('Ticket channels are not enabled yet. Bright needs the Manage Channels permission to create private tickets.');
     return;
   }
 
@@ -258,7 +265,7 @@ async function openTicket(interaction, topic) {
     name: 'ticket-' + number,
     type: ChannelType.GuildText,
     parent: category.id,
-    topic: 'Nightcrow ticket | member=' + user.id + ' | kind=' + topic + ' | number=' + number + ' | state=open',
+    topic: 'Bright ticket | member=' + user.id + ' | kind=' + topic + ' | number=' + number + ' | state=open',
     permissionOverwrites: ticketPermissions(guild, user.id, ownerId),
   });
 
@@ -266,7 +273,7 @@ async function openTicket(interaction, topic) {
   try {
     await channel.send({
       content: ['@here', ...recipients.map((id) => '<@' + id + '>')].join(' '),
-      embeds: [channelEmbed(typeName, 'Describe what you need help with and attach any relevant images. Staff will reply here.', 'Nightcrow Studios • Ticket #' + number)],
+      embeds: [channelEmbed(typeName, 'Describe what you need help with and attach any relevant images. Staff will reply here.', 'Brightest Studios • Ticket #' + number)],
       components: [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('nightcrow:ticket-close').setLabel('Close ticket').setStyle(ButtonStyle.Secondary),
       )],
@@ -298,7 +305,7 @@ async function closeTicket(interaction) {
     return;
   }
   if (interaction.user.id !== guild.ownerId && interaction.user.id !== openerId) {
-    await interaction.reply({ content: 'Only the ticket owner or Nightcrow Studios owner can close this ticket.', ephemeral: true });
+    await interaction.reply({ content: 'Only the ticket owner or Brightest Studios owner can close this ticket.', ephemeral: true });
     return;
   }
 
@@ -312,7 +319,7 @@ async function closeTicket(interaction) {
     new ButtonBuilder().setCustomId('nightcrow:ticket-close').setLabel('Ticket closed').setStyle(ButtonStyle.Secondary).setDisabled(true),
   );
   await interaction.message.edit({ components: [closedButton] });
-  await channel.send({ embeds: [channelEmbed('Ticket closed', 'This conversation is closed. Its messages remain available in this private channel.', 'Nightcrow Studios • Ticket #' + number)] });
+  await channel.send({ embeds: [channelEmbed('Ticket closed', 'This conversation is closed. Its messages remain available in this private channel.', 'Brightest Studios • Ticket #' + number)] });
   await interaction.editReply('Ticket closed.');
 }
 
@@ -396,7 +403,7 @@ function recognizeImage(bytes) {
   return task;
 }
 
-function hasNightcrowName(text) {
+function hasLinkedYouTubeChannelName(text) {
   const normalized = text.normalize('NFKC').toLowerCase();
   const compact = normalized.replace(/[\s._-]+/g, '');
   return compact.includes('nightcrowstudios') ||
@@ -416,8 +423,8 @@ function hasSubscribedLabel(text) {
 
 async function reviewProof(bytes) {
   const text = await recognizeImage(bytes);
-  if (!hasNightcrowName(text)) {
-    return { accepted: false, reason: 'Nightcrow Studios was not readable.' };
+  if (!hasLinkedYouTubeChannelName(text)) {
+    return { accepted: false, reason: 'Brightest Studios was not readable.' };
   }
   if (!hasSubscribedLabel(text)) {
     return { accepted: false, reason: 'A subscribed status was not readable.' };
@@ -426,7 +433,7 @@ async function reviewProof(bytes) {
 }
 
 client.once(Events.ClientReady, (ready) => {
-  console.log('Nightcrow Bot is online as ' + ready.user.tag + '.');
+  console.log('Bright is online as ' + ready.user.tag + '.');
   console.log('Local OCR languages: ' + OCR_LANGUAGES.join(', ') + '.');
   ensureServerMessages();
   registerProductCommand(ready).catch((error) => {
@@ -505,8 +512,8 @@ client.on(Events.MessageCreate, async (message) => {
 
       if (!role) throw new Error('Free Access role was not found.');
       if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('Manage Roles permission is missing.');
-      if (role.position >= botMember.roles.highest.position) throw new Error('Move Nightcrow Bot above Free Access in the role list.');
-      if (!member.roles.cache.has(role.id)) await member.roles.add(role, 'Verified Nightcrow YouTube subscription proof');
+      if (role.position >= botMember.roles.highest.position) throw new Error('Move Bright above Free Access in the role list.');
+      if (!member.roles.cache.has(role.id)) await member.roles.add(role, 'Verified Brightest Studios YouTube subscription proof');
 
       try {
         await rememberHash(proof.hash);
