@@ -131,7 +131,7 @@ const managedMessages = [
     marker: 'Nightcrow Studios • How to buy v1',
     payload: { embeds: [channelEmbed(
       'How to buy',
-      'Go to [nightcrowstudios.com](https://brighteststudios.com) and buy any product. Use code **EasyMoney** for **5% off** your purchase. The code can only be used once.',
+      'Go to [brighteststudios.com](https://brighteststudios.com) and buy any product. Use code **EasyMoney** for **5% off** your purchase. The code can only be used once.',
       'Nightcrow Studios • How to buy v1',
     )] },
   },
