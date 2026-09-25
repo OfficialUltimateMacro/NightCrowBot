@@ -80,6 +80,9 @@ async function ensureEasyMoneyPromo(config, fetchImpl) {
       base_currency: 'usd',
       code: 'EASYMONEY',
       promo_type: 'percentage',
+      new_users_only: false,
+      churned_users_only: false,
+      existing_memberships_only: false,
       one_per_customer: true,
       unlimited_stock: true,
     }, idempotencyKey('promo', 'easymoney'), fetchImpl);
