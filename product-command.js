@@ -12,7 +12,7 @@ const {
   TextInputStyle,
 } = require('discord.js');
 const { normalizeCatalog, normalizeProductDraft, readCatalog, slugify, uploadPublicCover, writeCatalog } = require('./product-catalog');
-const { createWhopCheckout, formatUsdPrice } = require('./whop-checkout');
+const { createWhopCheckout, formatUsdPrice, uploadWhopFile } = require('./whop-checkout');
 
 const WEBSITE_URL = (process.env.STOREFRONT_URL || 'https://brighteststudios.com').replace(/\/$/, '');
 const PRODUCT_DRAFT_TTL = 20 * 60 * 1000;
@@ -30,6 +30,11 @@ function productCommandDefinition() {
       .setDescription('Upload a product cover directly from Discord')
       .addStringOption((field) => field.setName('product').setDescription('Product ID shown in its page URL').setRequired(true).setMaxLength(64))
       .addAttachmentOption((field) => field.setName('image').setDescription('PNG, JPEG, or WebP, up to 8 MB').setRequired(true)))
+    .addSubcommand((option) => option
+      .setName('file')
+      .setDescription('Upload a buyer file to Whop from Discord')
+      .addStringOption((field) => field.setName('product').setDescription('Product ID shown in its page URL').setRequired(true).setMaxLength(64))
+      .addAttachmentOption((field) => field.setName('attachment').setDescription('One product file, up to 20 MB').setRequired(true)))
     .addSubcommand((option) => option
       .setName('update')
       .setDescription('Post a product update to the website')
@@ -183,6 +188,12 @@ async function handleCommand(interaction) {
       product.updatedAt = new Date().toISOString();
       await writeCatalog(catalog, 'Set product cover: ' + product.id);
       await interaction.editReply('Cover saved for **' + product.name + '**. It will appear after the Pages deployment finishes.');
+      return;
+    }
+
+    if (subcommand === 'file') {
+      const uploaded = await uploadWhopFile(interaction.options.getAttachment('attachment', true));
+      await interaction.editReply('Uploaded **' + uploaded.filename + '** to Whop as `' + uploaded.id + '`. This is not buyer delivery yet. Attach it to this product’s buyer-only Files experience in Whop before selling: ' + product.whopProductId + '.');
       return;
     }
 
