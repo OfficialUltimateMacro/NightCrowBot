@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createWhopCheckout, formatUsdPrice, parseUsdPrice } = require('./whop-checkout');
+const { createWhopCheckout, formatUsdPrice, parseUsdPrice, uploadWhopFile } = require('./whop-checkout');
 
 function response(body, status = 200) {
   return {
@@ -27,6 +27,21 @@ test('USD price input is parsed, formatted, and bounded', () => {
   assert.throws(() => parseUsdPrice('0'), /greater than 0/i);
   assert.throws(() => parseUsdPrice('9.999'), /numbers only/i);
   assert.throws(() => parseUsdPrice('ten'), /numbers only/i);
+});
+
+test('Discord product file bytes upload to Whop without exposing a download URL', async () => {
+  const calls = [];
+  const bytes = Buffer.from('sample');
+  const fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    if (String(url).endsWith('/files')) return response({ id: 'file_test', upload_url: 'https://media.whop.com/upload', upload_headers: { 'x-test': 'yes' } });
+    if (String(url).includes('discordapp.com')) return { ok: true, arrayBuffer: async () => bytes };
+    return { ok: true, status: 200 };
+  };
+  const result = await uploadWhopFile({ url: 'https://cdn.discordapp.com/attachments/test/file.rbxm', name: 'file.rbxm', size: bytes.length }, { env: { WHOP_API_KEY: 'test-key' }, fetch });
+  assert.deepEqual(result, { id: 'file_test', filename: 'file.rbxm' });
+  assert.equal(calls[2].options.method, 'PUT');
+  assert.deepEqual(calls[2].options.body, bytes);
 });
 
 test('publish creates a Whop product, one-time plan, and account promo with idempotency keys', async () => {
