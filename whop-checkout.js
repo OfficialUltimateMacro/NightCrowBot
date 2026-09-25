@@ -1,14 +1,14 @@
 'use strict';
 
 const DEFAULT_ACCOUNT_ID = 'biz_0bsVpFW750nDlH';
-const DEFAULT_API_VERSION_DATE = '2026-08-21-1';
+const DEFAULT_API_VERSION_DATE = '2026-09-23';
 const API_BASE_URL = 'https://api.whop.com/api/v1';
 
 function readConfig(options = {}) {
   const env = options.env || process.env;
   const token = options.token || env.WHOP_API_KEY;
   if (!token) {
-    throw new Error('Whop is not configured. Add WHOP_API_KEY to the Bright host variables.');
+    throw new Error('Whop is not configured. Add WHOP_API_KEY to the Bright bot host variables.');
   }
 
   return {
@@ -112,7 +112,7 @@ async function createWhopCheckout(product, options = {}) {
   if (!whopProduct?.id) throw new Error('Whop created the product but returned no product ID. Contact staff before retrying.');
 
   const whopPlan = await requestWhop(config, 'POST', '/plans', {
-    company_id: config.accountId,
+    account_id: config.accountId,
     product_id: whopProduct.id,
     title: product.name.slice(0, 30),
     description: product.summary,
@@ -147,5 +147,26 @@ async function createWhopCheckout(product, options = {}) {
   };
 }
 
-module.exports = { createWhopCheckout, formatUsdPrice, parseUsdPrice };
+async function uploadWhopFile(attachment, options = {}) {
+  const config = readConfig(options);
+  const fetchImpl = options.fetch || globalThis.fetch;
+  const source = new URL(attachment.url);
+  if (source.protocol !== 'https:' || !['cdn.discordapp.com', 'media.discordapp.net'].includes(source.hostname) || !attachment.size || attachment.size > 20 * 1024 * 1024) {
+    throw new Error('Attach a file directly in Discord, up to 20 MB.');
+  }
+  const filename = String(attachment.name || 'product-file').replace(/[\\/\r\n]/g, '_').slice(0, 180);
+  const file = await requestWhop(config, 'POST', '/files', { filename }, undefined, fetchImpl);
+  if (!file?.id || !file?.upload_url) throw new Error('Whop did not return a file upload destination.');
+  const destination = new URL(file.upload_url);
+  if (destination.protocol !== 'https:') throw new Error('Whop returned an unsafe upload destination.');
+  const download = await fetchImpl(source);
+  if (!download.ok) throw new Error('Discord attachment expired. Upload it again.');
+  const bytes = Buffer.from(await download.arrayBuffer());
+  if (bytes.length !== attachment.size) throw new Error('Attachment size changed during transfer.');
+  const uploaded = await fetchImpl(destination, { method: 'PUT', headers: file.upload_headers || {}, body: bytes });
+  if (!uploaded.ok) throw new Error('Whop rejected the file bytes (HTTP ' + uploaded.status + ').');
+  return { id: file.id, filename };
+}
+
+module.exports = { createWhopCheckout, formatUsdPrice, parseUsdPrice, uploadWhopFile };
 
