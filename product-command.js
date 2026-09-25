@@ -11,7 +11,7 @@ const {
   TextInputBuilder,
   TextInputStyle,
 } = require('discord.js');
-const { normalizeCatalog, normalizeProductDraft, readCatalog, slugify, writeCatalog } = require('./product-catalog');
+const { normalizeCatalog, normalizeProductDraft, readCatalog, slugify, uploadPublicCover, writeCatalog } = require('./product-catalog');
 const { createWhopCheckout, formatUsdPrice } = require('./whop-checkout');
 
 const WEBSITE_URL = (process.env.STOREFRONT_URL || 'https://brighteststudios.com').replace(/\/$/, '');
@@ -24,6 +24,12 @@ function productCommandDefinition() {
     .setDescription('Create and manage Brightest Studios storefront listings')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((option) => option.setName('create').setDescription('Build a product listing and checkout page'))
+    .addSubcommand((option) => option.setName('list').setDescription('List published products and their IDs'))
+    .addSubcommand((option) => option
+      .setName('cover')
+      .setDescription('Upload a product cover directly from Discord')
+      .addStringOption((field) => field.setName('product').setDescription('Product ID shown in its page URL').setRequired(true).setMaxLength(64))
+      .addAttachmentOption((field) => field.setName('image').setDescription('PNG, JPEG, or WebP, up to 8 MB').setRequired(true)))
     .addSubcommand((option) => option
       .setName('update')
       .setDescription('Post a product update to the website')
@@ -163,9 +169,22 @@ async function handleCommand(interaction) {
   await interaction.deferReply({ ephemeral: true });
   try {
     const catalog = normalizeCatalog(await readCatalog());
+    if (subcommand === 'list') {
+      const listed = catalog.products.filter((item) => item.status !== 'archived');
+      await interaction.editReply(listed.length ? listed.slice(0, 25).map((item) => '`' + item.id + '` · ' + item.name + ' · ' + item.price).join('\n') : 'No products are listed yet.');
+      return;
+    }
     const productId = slugify(interaction.options.getString('product', true));
     const product = catalog.products.find((item) => item.id === productId && item.status !== 'archived');
     if (!product) throw new Error('That product ID is not currently listed on the storefront.');
+
+    if (subcommand === 'cover') {
+      product.imageUrl = await uploadPublicCover(product.id, interaction.options.getAttachment('image', true));
+      product.updatedAt = new Date().toISOString();
+      await writeCatalog(catalog, 'Set product cover: ' + product.id);
+      await interaction.editReply('Cover saved for **' + product.name + '**. It will appear after the Pages deployment finishes.');
+      return;
+    }
 
     if (subcommand === 'remove') {
       product.status = 'archived';
