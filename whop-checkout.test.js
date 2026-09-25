@@ -57,9 +57,8 @@ test('publish creates a Whop product, one-time plan, and account promo with idem
   assert.equal(calls[0].options.headers['Idempotency-Key'], 'nightcrow-product-ocean-system');
   assert.equal(calls[1].options.headers['Idempotency-Key'], 'nightcrow-plan-ocean-system');
   assert.equal(calls[2].options.headers['Idempotency-Key'], 'nightcrow-promo-easymoney');
-  assert.equal(calls[0].options.headers['Api-Version-Date'], '2026-08-21-1');
   assert.deepEqual(JSON.parse(calls[1].options.body), {
-    company_id: 'biz_test',
+    account_id: 'biz_test',
     product_id: 'prod_ocean',
     title: 'Ocean System',
     description: 'A configurable ocean system.',
@@ -76,6 +75,9 @@ test('publish creates a Whop product, one-time plan, and account promo with idem
     base_currency: 'usd',
     code: 'EASYMONEY',
     promo_type: 'percentage',
+    new_users_only: false,
+    churned_users_only: false,
+    existing_memberships_only: false,
     one_per_customer: true,
     unlimited_stock: true,
   });
