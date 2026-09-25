@@ -77,7 +77,7 @@ function normalizeCatalog(value) {
 
 function githubConfig(options = {}) {
   const token = options.token || process.env.GITHUB_TOKEN;
-  if (!token) throw new Error('The product publisher is not configured yet. Add GITHUB_TOKEN to the Bright host variables.');
+  if (!token) throw new Error('The product publisher is not configured yet. Add GITHUB_TOKEN to the Bright bot host variables.');
 
   const repository = options.repository || process.env.STOREFRONT_REPOSITORY || DEFAULT_REPOSITORY;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('STOREFRONT_REPOSITORY must use owner/repository format.');
@@ -147,6 +147,38 @@ async function writeCatalog(catalogValue, message, options = {}) {
   }
 }
 
+async function uploadPublicCover(productId, attachment, options = {}) {
+  const config = githubConfig(options);
+  const extension = attachment.contentType === 'image/png' ? 'png' : attachment.contentType === 'image/jpeg' ? 'jpg' : attachment.contentType === 'image/webp' ? 'webp' : '';
+  if (!extension || !attachment.url || attachment.size > 8 * 1024 * 1024) {
+    throw new Error('Attach one PNG, JPEG, or WebP image under 8 MB.');
+  }
+  const source = new URL(attachment.url);
+  if (source.protocol !== 'https:' || !['cdn.discordapp.com', 'media.discordapp.net'].includes(source.hostname)) {
+    throw new Error('The cover must be uploaded directly to Discord.');
+  }
+  const response = await fetch(source);
+  if (!response.ok) throw new Error('Discord could not provide the attached image. Upload it again.');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length !== attachment.size || bytes.length > 8 * 1024 * 1024) throw new Error('The uploaded image size did not match the attachment.');
+  const valid = extension === 'png' ? bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))
+    : extension === 'jpg' ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+      : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
+  if (!valid) throw new Error('The attachment is not a valid image of the selected type.');
+  const assetPath = 'assets/products/' + slugify(productId) + '-cover.' + extension;
+  const assetUrl = 'https://api.github.com/repos/' + config.repository + '/contents/' + assetPath;
+  const existing = await fetch(assetUrl + '?ref=' + encodeURIComponent(config.branch), { headers: { Authorization: 'Bearer ' + config.token, Accept: 'application/vnd.github+json', 'User-Agent': 'Brightest-Studios-Storefront' } });
+  if (existing.status !== 404 && !existing.ok) throw new Error('GitHub could not check the existing cover image.');
+  const current = existing.ok ? await existing.json() : null;
+  const upload = await fetch(assetUrl, {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer ' + config.token, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json', 'User-Agent': 'Brightest-Studios-Storefront' },
+    body: JSON.stringify({ message: 'Upload product cover: ' + productId, content: bytes.toString('base64'), branch: config.branch, ...(current?.sha ? { sha: current.sha } : {}) }),
+  });
+  if (!upload.ok) throw new Error('GitHub rejected the cover upload (HTTP ' + upload.status + ').');
+  return 'https://brighteststudios.com/' + assetPath;
+}
+
 module.exports = {
   githubConfig,
   lineList,
@@ -154,6 +186,7 @@ module.exports = {
   normalizeProductDraft,
   readCatalog,
   slugify,
+  uploadPublicCover,
   writeCatalog,
 };
 
