@@ -40,6 +40,7 @@ test('Discord product file bytes upload to Whop without exposing a download URL'
   };
   const result = await uploadWhopFile({ url: 'https://cdn.discordapp.com/attachments/test/file.rbxm', name: 'file.rbxm', size: bytes.length }, { env: { WHOP_API_KEY: 'test-key' }, fetch });
   assert.deepEqual(result, { id: 'file_test', filename: 'file.rbxm' });
+  assert.equal(JSON.parse(calls[0].options.body).visibility, 'private');
   assert.equal(calls[2].options.method, 'PUT');
   assert.deepEqual(calls[2].options.body, bytes);
 });
