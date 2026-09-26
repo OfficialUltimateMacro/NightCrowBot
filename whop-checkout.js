@@ -1,7 +1,7 @@
 'use strict';
 
 const DEFAULT_ACCOUNT_ID = 'biz_0bsVpFW750nDlH';
-const DEFAULT_API_VERSION_DATE = '2026-09-23';
+const DEFAULT_API_VERSION_DATE = '2026-08-21-1';
 const API_BASE_URL = 'https://api.whop.com/api/v1';
 
 function readConfig(options = {}) {
