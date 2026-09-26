@@ -155,8 +155,9 @@ async function uploadWhopFile(attachment, options = {}) {
     throw new Error('Attach a file directly in Discord, up to 20 MB.');
   }
   const filename = String(attachment.name || 'product-file').replace(/[\\/\r\n]/g, '_').slice(0, 180);
-  const file = await requestWhop(config, 'POST', '/files', { filename }, undefined, fetchImpl);
+  const file = await requestWhop(config, 'POST', '/files', { filename, visibility: 'private' }, undefined, fetchImpl);
   if (!file?.id || !file?.upload_url) throw new Error('Whop did not return a file upload destination.');
+  if (file.visibility === 'public') throw new Error('Whop returned a public file destination. Paid files must remain private.');
   const destination = new URL(file.upload_url);
   if (destination.protocol !== 'https:') throw new Error('Whop returned an unsafe upload destination.');
   const download = await fetchImpl(source);
